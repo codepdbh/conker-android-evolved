@@ -1,3 +1,26 @@
+# Conker: Live & Reloaded — Android Evolved
+
+Port experimental a Android ARM64 por recompilación estática, sin emulador. **Todavía no es jugable: el juego no se ha ejecutado
+nunca en este port.** Solo se ha probado el launcher, en un Redmi Note 8. El estado de cada parte está en
+[docs/PROGRESS.md](docs/PROGRESS.md).
+
+| Parte | Estado |
+|---|---|
+| `libmain.so` para ARM64 | Compila y enlaza; sin ejecutar |
+| Launcher: compatibilidad e informe de logs | Probado en un Redmi Note 8 |
+| Editor del HUD | Abre; arrastrar, guardar y multitáctil sin probar |
+| Renderer con alternativas para Vulkan 1.1 | Compilado; sin ejecutar |
+| Mali y Xclipse (Helio, Dimensity, Exynos) | Sin probar, no hay dispositivos |
+
+El repositorio no incluye el juego, sus recursos ni código generado desde su ejecutable. Hace falta una copia propia:
+[docs/BUILDING.md](docs/BUILDING.md).
+
+Es un derivado modificado de [Mabec-games/live-and-recompiled](https://github.com/Mabec-games/live-and-recompiled), rama `android`,
+commit `25e614d`, con cambios desde el 2026-11-02 (GPL-3.0). Lo de abajo es el README de upstream: describe su versión, y su
+sección de Android y sus requisitos no reflejan estos cambios. Aquí, en [docs/](docs/ARCHITECTURE.md).
+
+---
+
 # Live & Recompiled
 
 An unofficial native PC port of the original Xbox *Conker: Live & Reloaded*, built on a heavily modified version of

@@ -206,6 +206,9 @@ struct PsoKey {
     float zslope;
     uint32_t rtfmt;    // DXGI format of the colour target, whichever API draws it
     uint32_t samples;  // of the bound targets
+    // a GPU without extended dynamic state has these in the pipeline; zero on the others
+    uint32_t exact_topo;
+    uint32_t strides[16];  // per binding
 };
 
 // a pipeline in shaders.rec: its shaders by record id, the key with vs and ps zero

@@ -20,16 +20,29 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "org.liveandrecompiled.conker"
+        // its own id: it installs beside upstream's app, with its own saves and settings
+        applicationId = "com.conker.androidevolved"
         minSdk = 28
         targetSdk = 36
         versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = (findProperty("versionName") as String?) ?: "dev"
         ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
+    }
+
+    // libprobe.so, the launcher's own native code (src/main/cpp/probe.cpp); libmain.so comes from the Zig build
+    ndkVersion = "28.2.13676358"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
+        }
     }
 
     sourceSets["main"].java.directories.add(sdlJava.path)
     if (nativeLibs != null) sourceSets["main"].jniLibs.directories.add(nativeLibs.path)
+    // accepted_xbe.txt: the default.xbe this build was recompiled from, beyond the releases the launcher knows
+    (findProperty("extraAssets") as String?)?.let { sourceSets["main"].assets.directories.add(it) }
 
     buildTypes {
         release {

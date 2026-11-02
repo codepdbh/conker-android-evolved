@@ -1,2 +1,5 @@
+# LF on any checkout: CMake keeps a multi-line string's line endings as they are in the file
+* text=auto eol=lf
+*.jar binary
 # batch files need CRLF: cmd.exe misreads labels in LF files
 *.bat text eol=crlf

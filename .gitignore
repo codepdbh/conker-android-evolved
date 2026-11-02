@@ -14,6 +14,8 @@ toolchain/
 *.obj
 *.o
 
+__pycache__/
+
 # recompiled code, derived from the game
 /generated/
 
@@ -23,6 +25,7 @@ toolchain/
 # runtime files
 settings.toml
 /logs/
+/src/android/app/.cxx/
 /hdd/
 /CrashDumps/
 
@@ -43,7 +46,6 @@ settings.toml
 # run log
 /proton-run.log
 
-docs/
 run-proton.sh
 run-linux.sh
 

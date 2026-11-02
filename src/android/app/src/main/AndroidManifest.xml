@@ -4,8 +4,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:installLocation="auto">
 
-    <!-- the renderer is Vulkan 1.3 -->
-    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x403000" android:required="true" />
+    <!-- not required here, so the launcher installs on any phone and can say what it lacks -->
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
@@ -38,7 +38,23 @@
         </activity>
 
         <activity
+            android:name=".TouchEditorActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden" />
+
+        <!-- the report, to the app the player sends it to -->
+        <provider
+            android:name=".ReportProvider"
+            android:authorities="${applicationId}.reports"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <!-- its own process: a crash here leaves the launcher, and its report, alive -->
+        <activity
             android:name=".GameActivity"
+            android:process=":game"
             android:exported="false"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
             android:screenOrientation="sensorLandscape"

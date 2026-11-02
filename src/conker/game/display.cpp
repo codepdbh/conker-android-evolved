@@ -48,7 +48,8 @@
 
 namespace display {
 
-#if !defined(XBE_HEADLESS)
+// the console's 30 on a phone too, until the menu asks for more
+#if !defined(XBE_HEADLESS) && !defined(__ANDROID__)
 uint32_t g_frame_rate = 60;
 #else
 uint32_t g_frame_rate = 30;

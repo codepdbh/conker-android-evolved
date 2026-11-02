@@ -50,7 +50,8 @@ endif()
 # Zig reads where libc is from a file named by ZIG_LIBC; the compiler and the linker are started through `cmake -E env`
 # with it set, so a plain ninja run has it too (and CMake's own checks, which read this file again)
 set(XBE_ANDROID_LIBC ${CMAKE_BINARY_DIR}/zig-android-libc.txt)
-file(WRITE ${XBE_ANDROID_LIBC} "include_dir=${XBE_ANDROID_SYSROOT}/usr/include
+# LF on Windows too, where file(WRITE) makes CRLF: Zig would take the CR as the end of each path
+file(CONFIGURE OUTPUT ${XBE_ANDROID_LIBC} NEWLINE_STYLE UNIX @ONLY CONTENT "include_dir=${XBE_ANDROID_SYSROOT}/usr/include
 sys_include_dir=${XBE_ANDROID_SYSROOT}/usr/include/aarch64-linux-android
 crt_dir=${XBE_ANDROID_SYSROOT}/usr/lib/aarch64-linux-android/${XBE_ANDROID_API}
 msvc_lib_dir=
@@ -67,6 +68,8 @@ set(CMAKE_C_COMPILER ${ZIG_HOST_DIR}/zig${HOST_EXE} cc)
 set(CMAKE_CXX_COMPILER ${ZIG_HOST_DIR}/zig${HOST_EXE} c++)
 set(CMAKE_USER_MAKE_RULES_OVERRIDE ${CMAKE_CURRENT_LIST_DIR}/zig-rules.cmake)  # `zig ar` for the static libraries
 set(CMAKE_LINK_DEPENDS_USE_LINKER OFF)
+# `zig cc` hands a precompiled header on to its linker, which takes it for an object: SDL builds without them
+set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
 # libraries looked for (SDL's OpenSLES, log, android) are the sysroot's
 set(CMAKE_FIND_ROOT_PATH ${XBE_ANDROID_SYSROOT})
 set(CMAKE_LIBRARY_ARCHITECTURE aarch64-linux-android)
@@ -76,10 +79,11 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ARMv8.2: every phone with Vulkan 1.3 has it, and it brings the atomics without the outline calls; -fPIC on the compile
-# line itself, as the player kit's compile of the game code (add_xbe_android_kit) takes these flags as they are
+# ARMv8.0: phones on Vulkan 1.1 (Snapdragon 665's Cortex-A73 and A53, the Helio G and P lines' A53) have neither ARMv8.2
+# nor its LSE atomics, and an instruction they lack ends the app at its first atomic. -fPIC on the compile line itself,
+# as the player kit's compile of the game code (add_xbe_android_kit) takes these flags as they are
 set(XBE_ZIG_TARGET aarch64-linux-android.${XBE_ANDROID_API})
-set(CMAKE_C_FLAGS_INIT "-target ${XBE_ZIG_TARGET} -mcpu=generic+v8_2a -fPIC -g0 -Wno-nullability-completeness")
-set(CMAKE_CXX_FLAGS_INIT "-target ${XBE_ZIG_TARGET} -mcpu=generic+v8_2a -fPIC -g0 -Wno-nullability-completeness")
+set(CMAKE_C_FLAGS_INIT "-target ${XBE_ZIG_TARGET} -mcpu=generic -fPIC -g0 -Wno-nullability-completeness")
+set(CMAKE_CXX_FLAGS_INIT "-target ${XBE_ZIG_TARGET} -mcpu=generic -fPIC -g0 -Wno-nullability-completeness")
 # Zig looks for the -l libraries only where it is told to, the libc file's crt_dir is not one of those places
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-L${XBE_ANDROID_SYSROOT}/usr/lib/aarch64-linux-android/${XBE_ANDROID_API}")

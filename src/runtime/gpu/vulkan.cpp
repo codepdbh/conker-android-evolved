@@ -62,6 +62,8 @@
 #include <smmintrin.h>
 #endif
 
+#include <deque>
+
 #include "app/app.h"
 #ifndef _WIN32
 #include "app/touch.h"
@@ -712,6 +714,9 @@ EShLanguage StageOf(const char* profile) {
 }
 
 // the HLSL to SPIR-V, any thread: registers bN, tN, sN at bindings kBindCb + N, kBindTex + N, kBindSampler + N; a
+// the device runs Vulkan 1.3: SPIR-V 1.6, or 1.3 for a Vulkan 1.1 phone (set once by PickDevice, before any compile)
+bool g_vulkan_13 = true;
+
 // vertex input at its register's location (VK_LOC), what the stages hand on in declaration order
 bool CompileSpirv(const std::string& src, const char* entry, const char* profile, Spirv& out, std::string& err) {
     EShLanguage stage = StageOf(profile);
@@ -723,8 +728,8 @@ bool CompileSpirv(const std::string& src, const char* entry, const char* profile
     sh.setSourceEntryPoint(entry);
     sh.setPreamble("#define VK_LOC(n) [[vk::location(n)]]\n");
     sh.setEnvInput(glslang::EShSourceHlsl, stage, glslang::EShClientVulkan, 100);
-    sh.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
-    sh.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
+    sh.setEnvClient(glslang::EShClientVulkan, g_vulkan_13 ? glslang::EShTargetVulkan_1_3 : glslang::EShTargetVulkan_1_1);
+    sh.setEnvTarget(glslang::EShTargetSpv, g_vulkan_13 ? glslang::EShTargetSpv_1_6 : glslang::EShTargetSpv_1_3);
     sh.setHlslIoMapping(true);
     sh.setAutoMapLocations(true);
     sh.setShiftBinding(glslang::EResUbo, kBindCb);
@@ -890,6 +895,8 @@ private:
         uint64_t used = 0;
         uint64_t fence = 0;
         std::vector<std::shared_ptr<void>> garbage;
+        std::vector<VkDescriptorPool> pools;  // without push descriptors (NewDescriptorSet)
+        size_t pool_used = 0;
     };
     struct Alloc {
         VkBuffer buf;
@@ -947,6 +954,26 @@ private:
     void Submit(bool wait, VkSemaphore wait_sem = VK_NULL_HANDLE, VkSemaphore signal_sem = VK_NULL_HANDLE);
     void WaitTimeline(uint64_t value);
     uint64_t Completed() const;
+    VkFence NewFence();
+    VkDescriptorSet NewDescriptorSet();
+    VkRenderPass RenderPassFor(VkFormat color, VkFormat depth, uint32_t samples) const;
+    void BeginRenderPass(Image* c, Image* z);
+    struct DeviceSupport {
+        bool timeline, host_reset, rendering, dynamic_state;
+        bool ext_timeline, ext_reset, ext_rendering, ext_dynamic;  // by extension, not by the GPU's version
+        bool driver_properties;
+    };
+    static DeviceSupport QuerySupport(VkPhysicalDevice d, uint32_t api, const std::vector<VkExtensionProperties>& exts);
+    // a vertex stride or a topology: in the pipeline itself on a GPU without extended dynamic state (the Draw's key)
+    void BindVertexBuffers(uint32_t count, const VkBuffer* bufs, const VkDeviceSize* offs, const VkDeviceSize* sizes,
+                           const VkDeviceSize* strides) {
+        if (have_eds_) vkCmdBindVertexBuffers2(cmd_, 0, count, bufs, offs, sizes, strides);
+        else vkCmdBindVertexBuffers(cmd_, 0, count, bufs, offs);
+    }
+    void SetTopology(int topo) {
+        if (have_eds_) vkCmdSetPrimitiveTopology(cmd_, VkPrimitiveTopology(topo));
+        drawn_.topo = topo;
+    }
     void Blit(VkImageView src, const float uvrect[4], const BlitOptions& o);
     void DrawFullScreen(VkPipeline pso, const Alloc& cb, std::array<VkImageView, 4> views);
     Image* Feedback(Target& t);
@@ -1170,7 +1197,32 @@ private:
     bool gs_ = true;
     bool bc_ = true;
     bool custom_border_ = false;
-    bool dynamic_rendering_ext_ = false;
+    // Vulkan 1.3 on a PC; phones may have 1.1, whose GPUs lack these, each with a way round it (the Vulkan: line of the log)
+    uint32_t instance_api_ = VK_API_VERSION_1_1;
+    uint32_t api_ = VK_API_VERSION_1_1;
+    DeviceSupport support_{};
+    bool have_rendering_ = false;   // or render passes
+    bool have_timeline_ = false;    // or a fence per submit
+    bool have_host_reset_ = false;  // or queries reset in the command buffer, outside a pass
+    bool have_eds_ = false;         // or a pipeline per topology and strides
+    bool have_push_ = false;        // or descriptor sets from the frame's pools
+    struct PendingFence {
+        uint64_t value;
+        VkFence fence;
+    };
+    mutable std::deque<PendingFence> pending_fences_;
+    mutable std::vector<VkFence> free_fences_;
+    mutable uint64_t fences_done_ = 0;
+    VkFence spare_fence_ = VK_NULL_HANDLE;  // from a submit that failed
+    mutable std::mutex render_pass_lock_;   // warm-up threads make pipelines too
+    mutable std::unordered_map<uint64_t, VkRenderPass> render_passes_;
+    struct FramebufferKey {
+        VkImageView c, z;
+        uint32_t w, h;
+        bool operator==(const FramebufferKey&) const = default;
+    };
+    std::vector<std::pair<FramebufferKey, VkFramebuffer>> framebuffers_;
+    uint32_t query_reset_end_ = 0;  // without host query reset: the queries up to here are ready for use
     uint32_t custom_border_max_ = 0;
     uint32_t custom_borders_ = 0;
     VkFormat depth_fmt_ = VK_FORMAT_D24_UNORM_S8_UINT;  // targets'
@@ -1263,6 +1315,8 @@ private:
         Topology topology = Topology::Triangles;
         bool strip = false, pretransformed = false;
         std::array<VertexElement, 16> elements{};
+        uint32_t buffer_count = 0;
+        uint32_t strides[16] = {};  // in the pipeline without extended dynamic state: another stride is another pipeline
     };
     KeptDraw kept_;
     bool same_state_ = false;  // Changed: nothing the kept draw drew with has changed since
@@ -1475,9 +1529,14 @@ VulkanBackend::~VulkanBackend() {
     dummy_cube_.reset();
     dummy_depth_.reset();
     lut_.reset();
+    for (VkFence fence : free_fences_) vkDestroyFence(dev_, fence, nullptr);
+    for (const PendingFence& p : pending_fences_) vkDestroyFence(dev_, p.fence, nullptr);
+    if (spare_fence_) vkDestroyFence(dev_, spare_fence_, nullptr);
+    for (auto& [key, pass] : render_passes_) vkDestroyRenderPass(dev_, pass, nullptr);
     for (auto& f : frames_) {
         f.garbage.clear();
         f.upload.reset();
+        for (VkDescriptorPool pool : f.pools) vkDestroyDescriptorPool(dev_, pool, nullptr);
         for (VkSemaphore a : f.acquired) {
             if (a) vkDestroySemaphore(dev_, a, nullptr);
         }
@@ -1513,8 +1572,10 @@ bool VulkanBackend::CreateInstance() {
         LOGE("vulkan: no Vulkan loader");
         return false;
     }
-    if (volkGetInstanceVersion() < VK_API_VERSION_1_3) {
-        LOGE("vulkan: the loader is older than Vulkan 1.3");
+    // Vulkan 1.3 where there is one, down to 1.1: what 1.1 lacks has a way round it (see have_rendering_ and the others)
+    instance_api_ = std::min<uint32_t>(volkGetInstanceVersion(), VK_API_VERSION_1_3);
+    if (instance_api_ < VK_API_VERSION_1_1) {
+        LOGE("vulkan: the loader is older than Vulkan 1.1");
         return false;
     }
 #ifdef _WIN32
@@ -1528,7 +1589,7 @@ bool VulkanBackend::CreateInstance() {
     VkApplicationInfo ai{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     ai.pApplicationName = app::kGame.log;
     ai.pEngineName = "xbe_recomp";
-    ai.apiVersion = VK_API_VERSION_1_3;
+    ai.apiVersion = instance_api_;
     VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ci.pApplicationInfo = &ai;
     ci.enabledExtensionCount = uint32_t(exts.size());
@@ -1587,7 +1648,47 @@ bool HasExtension(const std::vector<VkExtensionProperties>& list, const char* na
     return false;
 }
 
-// a Vulkan 1.3 GPU that presents to the window and has what the renderer needs, a discrete one first
+// what the GPU offers beyond Vulkan 1.1, and the extensions to enable for it: a feature promoted to the core of the GPU's
+// version needs none. A structure goes in the chain only when the GPU names it: old drivers don't all skip the others
+VulkanBackend::DeviceSupport VulkanBackend::QuerySupport(VkPhysicalDevice d, uint32_t api,
+                                                         const std::vector<VkExtensionProperties>& exts) {
+    bool v12 = api >= VK_API_VERSION_1_2, v13 = api >= VK_API_VERSION_1_3;
+    bool ext_timeline = !v12 && HasExtension(exts, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+    bool ext_reset = !v12 && HasExtension(exts, VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME);
+    bool ext_rendering = !v13 && HasExtension(exts, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) &&
+                         HasExtension(exts, VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME) &&
+                         HasExtension(exts, VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);
+    bool ext_dynamic = !v13 && HasExtension(exts, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES};
+    VkPhysicalDeviceHostQueryResetFeatures reset{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES};
+    VkPhysicalDeviceDynamicRenderingFeatures rendering{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES};
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT dynamic{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT};
+    void* chain = nullptr;
+    auto add = [&](auto& s) {
+        s.pNext = chain;
+        chain = &s;
+    };
+    if (v12 || ext_timeline) add(timeline);
+    if (v12 || ext_reset) add(reset);
+    if (v13 || ext_rendering) add(rendering);
+    if (ext_dynamic) add(dynamic);
+    VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, chain};
+    vkGetPhysicalDeviceFeatures2(d, &f);
+    DeviceSupport out{};
+    out.timeline = timeline.timelineSemaphore;
+    out.host_reset = reset.hostQueryReset;
+    out.rendering = rendering.dynamicRendering;
+    out.dynamic_state = v13 || (ext_dynamic && dynamic.extendedDynamicState);
+    out.ext_timeline = ext_timeline && out.timeline;
+    out.ext_reset = ext_reset && out.host_reset;
+    out.ext_rendering = ext_rendering && out.rendering;
+    out.ext_dynamic = ext_dynamic && out.dynamic_state;
+    out.driver_properties = HasExtension(exts, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME);
+    return out;
+}
+
+// a Vulkan 1.1 or newer GPU that presents to the window and has what the renderer needs, a discrete one first. What
+// newer versions and extensions add is taken where the GPU has it (QuerySupport), and worked around where not
 bool VulkanBackend::PickDevice() {
     uint32_t n = 0;
     vkEnumeratePhysicalDevices(inst_, &n, nullptr);
@@ -1601,16 +1702,16 @@ bool VulkanBackend::PickDevice() {
         vkEnumerateDeviceExtensionProperties(d, nullptr, &en, nullptr);
         std::vector<VkExtensionProperties> exts(en);
         vkEnumerateDeviceExtensionProperties(d, nullptr, &en, exts.data());
-        VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-        VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &f13};
-        VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f12};
-        if (p.apiVersion >= VK_API_VERSION_1_3) vkGetPhysicalDeviceFeatures2(d, &f);
+        const uint32_t api = std::min(p.apiVersion, instance_api_);
+        VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+        DeviceSupport support{};
         const char* lacks = nullptr;
-        if (p.apiVersion < VK_API_VERSION_1_3) lacks = "Vulkan 1.3";
+        if (api < VK_API_VERSION_1_1) lacks = "Vulkan 1.1";
         else if (!HasExtension(exts, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) lacks = "a swap chain";
-        else if (!HasExtension(exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) lacks = "push descriptors";
-        else if (!f12.timelineSemaphore || !f12.hostQueryReset) lacks = "timeline semaphores or host query resets";
-        else if (!f13.dynamicRendering) lacks = "dynamic rendering";
+        if (!lacks) {
+            vkGetPhysicalDeviceFeatures2(d, &f);
+            support = QuerySupport(d, api, exts);
+        }
         uint32_t qn = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(d, &qn, nullptr);
         std::vector<VkQueueFamilyProperties> qs(qn);
@@ -1632,6 +1733,8 @@ bool VulkanBackend::PickDevice() {
         best_score = score;
         phys_ = d;
         props_ = p;
+        api_ = api;
+        support_ = support;
         qfam_ = uint32_t(family);
         aniso_ = f.features.samplerAnisotropy;
         non_solid_ = f.features.fillModeNonSolid;
@@ -1640,18 +1743,29 @@ bool VulkanBackend::PickDevice() {
         gs_ = f.features.geometryShader;
         bc_ = f.features.textureCompressionBC;
         custom_border_ = HasExtension(exts, VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
-        dynamic_rendering_ext_ = HasExtension(exts, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+        have_rendering_ = support.rendering;
+        have_timeline_ = support.timeline;
+        have_host_reset_ = support.host_reset;
+        have_eds_ = support.dynamic_state;
+        have_push_ = HasExtension(exts, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     }
     if (!phys_) {
         LOGE("vulkan: no GPU the renderer can use");
         return false;
     }
-    VkPhysicalDeviceVulkan12Properties p12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
-    VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &p12};
-    vkGetPhysicalDeviceProperties2(phys_, &p2);
-    LOGR("Vulkan device: %s (%s %s, Vulkan %u.%u.%u)", props_.deviceName, p12.driverName, p12.driverInfo,
+    g_vulkan_13 = api_ >= VK_API_VERSION_1_3;
+    VkPhysicalDeviceDriverProperties driver{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    if (api_ >= VK_API_VERSION_1_2 || support_.driver_properties) {
+        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &driver};
+        vkGetPhysicalDeviceProperties2(phys_, &p2);
+    }
+    LOGR("Vulkan device: %s (%s %s, Vulkan %u.%u.%u)", props_.deviceName, driver.driverName, driver.driverInfo,
          VK_API_VERSION_MAJOR(props_.apiVersion), VK_API_VERSION_MINOR(props_.apiVersion),
          VK_API_VERSION_PATCH(props_.apiVersion));
+    LOGR("Vulkan: dynamic rendering %s, timeline semaphores %s, host query reset %s, extended dynamic state %s, push "
+         "descriptors %s", have_rendering_ ? "yes" : "no: render passes", have_timeline_ ? "yes" : "no: fences",
+         have_host_reset_ ? "yes" : "no: reset in the command buffer", have_eds_ ? "yes" : "no: more pipelines",
+         have_push_ ? "yes" : "no: a set per push");
     // targets' depth: D24S8 like the console where the GPU has it (AMD's don't)
     auto supports = [&](VkFormat f, VkFormatFeatureFlags want) {
         VkFormatProperties fp;
@@ -1686,22 +1800,42 @@ bool VulkanBackend::CreateDevice() {
     VkPhysicalDeviceCustomBorderColorFeaturesEXT border{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT};
     border.customBorderColors = VK_TRUE;
     border.customBorderColorWithoutFormat = VK_TRUE;
-    VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, custom_border_ ? &border : nullptr};
-    f13.dynamicRendering = VK_TRUE;
-    VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &f13};
-    f12.timelineSemaphore = VK_TRUE;
-    f12.hostQueryReset = VK_TRUE;
-    VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f12};
+    // what the GPU offers past 1.1, each by its own structure as these hold on any version
+    void* chain = custom_border_ ? &border : nullptr;
+    auto add = [&](auto& s) {
+        s.pNext = chain;
+        chain = &s;
+    };
+    VkPhysicalDeviceTimelineSemaphoreFeatures timeline{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES};
+    timeline.timelineSemaphore = VK_TRUE;
+    VkPhysicalDeviceHostQueryResetFeatures reset{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES};
+    reset.hostQueryReset = VK_TRUE;
+    VkPhysicalDeviceDynamicRenderingFeatures rendering{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES};
+    rendering.dynamicRendering = VK_TRUE;
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT dynamic{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT};
+    dynamic.extendedDynamicState = VK_TRUE;
+    if (have_timeline_) add(timeline);
+    if (have_host_reset_) add(reset);
+    if (have_rendering_) add(rendering);
+    if (support_.ext_dynamic) add(dynamic);
+    VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, chain};
     f.features.geometryShader = gs_;
     f.features.textureCompressionBC = bc_;
     f.features.samplerAnisotropy = aniso_;
     f.features.fillModeNonSolid = non_solid_;
     f.features.tessellationShader = tess_;
     f.features.occlusionQueryPrecise = precise_;
-    std::vector<const char*> exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
+    std::vector<const char*> exts = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    if (have_push_) exts.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     if (custom_border_) exts.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
-    // ImGui looks its functions up by the extension's names
-    if (dynamic_rendering_ext_) exts.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+    if (support_.ext_timeline) exts.push_back(VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
+    if (support_.ext_reset) exts.push_back(VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME);
+    if (support_.ext_rendering) {
+        exts.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+        exts.push_back(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);
+        exts.push_back(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);
+    }
+    if (support_.ext_dynamic) exts.push_back(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f};
     ci.queueCreateInfoCount = 1;
     ci.pQueueCreateInfos = &qi;
@@ -1712,6 +1846,14 @@ bool VulkanBackend::CreateDevice() {
         return false;
     }
     volkLoadDevice(dev_);
+    // a feature by its extension is the core function under its extension's name: the one name below
+    if (!vkCmdBeginRendering) vkCmdBeginRendering = vkCmdBeginRenderingKHR;
+    if (!vkCmdEndRendering) vkCmdEndRendering = vkCmdEndRenderingKHR;
+    if (!vkWaitSemaphores) vkWaitSemaphores = vkWaitSemaphoresKHR;
+    if (!vkGetSemaphoreCounterValue) vkGetSemaphoreCounterValue = vkGetSemaphoreCounterValueKHR;
+    if (!vkResetQueryPool) vkResetQueryPool = vkResetQueryPoolEXT;
+    if (!vkCmdSetPrimitiveTopology) vkCmdSetPrimitiveTopology = vkCmdSetPrimitiveTopologyEXT;
+    if (!vkCmdBindVertexBuffers2) vkCmdBindVertexBuffers2 = vkCmdBindVertexBuffers2EXT;
     vkGetDeviceQueue(dev_, qfam_, 0, &queue_);
     if (custom_border_) {
         VkPhysicalDeviceCustomBorderColorPropertiesEXT bp{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_PROPERTIES_EXT};
@@ -1723,7 +1865,7 @@ bool VulkanBackend::CreateDevice() {
     fn.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
     fn.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
     VmaAllocatorCreateInfo ai{};
-    ai.vulkanApiVersion = VK_API_VERSION_1_3;
+    ai.vulkanApiVersion = api_;
     ai.physicalDevice = phys_;
     ai.device = dev_;
     ai.instance = inst_;
@@ -1733,6 +1875,7 @@ bool VulkanBackend::CreateDevice() {
         return false;
     }
     g_vk = {dev_, vma_};
+    if (!have_timeline_) return true;  // fences instead: Submit
     VkSemaphoreTypeCreateInfo ti{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
     ti.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
     VkSemaphoreCreateInfo si{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, &ti};
@@ -1835,7 +1978,7 @@ bool VulkanBackend::CreateSwapChain() {
     return true;
 }
 
-// one push descriptor set for every pipeline: b0 b1, t0 to t4, s0 to s4
+// one descriptor set for every pipeline, pushed where the GPU can: b0 b1, t0 to t4, s0 to s4
 bool VulkanBackend::CreateLayout() {
     VkDescriptorSetLayoutBinding b[kBindings] = {};
     for (uint32_t i = 0; i < kBindings; i++) {
@@ -1847,7 +1990,7 @@ bool VulkanBackend::CreateLayout() {
         b[i].stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS;
     }
     VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-    li.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    li.flags = have_push_ ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR : 0;
     li.bindingCount = kBindings;
     li.pBindings = b;
     if (vkCreateDescriptorSetLayout(dev_, &li, nullptr, &dsl_) != VK_SUCCESS) return false;
@@ -1937,7 +2080,7 @@ bool VulkanBackend::InitUi() {
     pi.pPoolSizes = &ps;
     if (vkCreateDescriptorPool(dev_, &pi, nullptr, &ui_pool_) != VK_SUCCESS) return false;
     ImGui_ImplVulkan_InitInfo ii{};
-    ii.ApiVersion = VK_API_VERSION_1_3;
+    ii.ApiVersion = api_;
     ii.Instance = inst_;
     ii.PhysicalDevice = phys_;
     ii.Device = dev_;
@@ -1948,7 +2091,8 @@ bool VulkanBackend::InitUi() {
     // its vertex buffers go round per draw: one per picture, kMaxGen a frame with frame generation, kFrames in flight
     ii.ImageCount = std::max<uint32_t>(uint32_t(bb_.size()), kFrames * kMaxGen + 1);
     ii.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-    ii.UseDynamicRendering = true;
+    ii.UseDynamicRendering = have_rendering_;
+    if (!have_rendering_) ii.PipelineInfoMain.RenderPass = RenderPassFor(swap_fmt_, VK_FORMAT_UNDEFINED, 1);
     ii.PipelineInfoMain.PipelineRenderingCreateInfo = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
     ii.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     ii.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swap_fmt_;
@@ -2042,6 +2186,10 @@ void VulkanBackend::Begin() {
     // a new command buffer: the ring may have started over
     last_vc_ok_ = last_dc_ok_ = false;
     ForgetDrawCmd();
+    Frame& frame = CurrentFrame();
+    for (VkDescriptorPool pool : frame.pools) vkResetDescriptorPool(dev_, pool, 0);
+    frame.pool_used = 0;
+    framebuffers_.clear();
     float zero[4] = {};
     vkCmdSetBlendConstants(cmd_, zero);
     vkCmdSetStencilReference(cmd_, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
@@ -2063,16 +2211,27 @@ void VulkanBackend::Submit(bool wait, VkSemaphore wait_sem, VkSemaphore signal_s
     ts.pWaitSemaphoreValues = &wait_value;
     ts.signalSemaphoreValueCount = signal_sem ? 2 : 1;
     ts.pSignalSemaphoreValues = values;
-    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO, &ts};
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     si.waitSemaphoreCount = wait_sem ? 1 : 0;
     si.pWaitSemaphores = &wait_sem;
     si.pWaitDstStageMask = &stage;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd_;
-    si.signalSemaphoreCount = signal_sem ? 2 : 1;
-    si.pSignalSemaphores = signals;
-    if (VkResult r = vkQueueSubmit(queue_, 1, &si, VK_NULL_HANDLE); r != VK_SUCCESS) {
+    VkFence fence = VK_NULL_HANDLE;
+    if (have_timeline_) {
+        si.pNext = &ts;
+        si.signalSemaphoreCount = signal_sem ? 2 : 1;
+        si.pSignalSemaphores = signals;
+    } else {
+        si.signalSemaphoreCount = signal_sem ? 1 : 0;
+        si.pSignalSemaphores = &signal_sem;
+        fence = NewFence();
+    }
+    if (VkResult r = vkQueueSubmit(queue_, 1, &si, fence); r != VK_SUCCESS) {
         LOG_FIRST(4, "vulkan: submit failed (%d)", int(r));
+        if (fence) spare_fence_ = fence;  // not signalled, and not waited for: ready for the next submit as it is
+    } else if (fence) {
+        pending_fences_.push_back({value, fence});
     }
     Frame& f = CurrentFrame();
     f.fence = value;
@@ -2088,6 +2247,14 @@ void VulkanBackend::Submit(bool wait, VkSemaphore wait_sem, VkSemaphore signal_s
 }
 
 void VulkanBackend::WaitTimeline(uint64_t value) {
+    if (!have_timeline_) {
+        // the submits' fences in order, up to the one for value
+        while (Completed() < value && !pending_fences_.empty())
+            vkWaitForFences(dev_, 1, &pending_fences_.front().fence, VK_TRUE, UINT64_MAX);
+        // nothing left in flight: what was asked for never reached the queue, there is nothing more to wait for
+        if (pending_fences_.empty()) fences_done_ = std::max(fences_done_, value);
+        return;
+    }
     VkSemaphoreWaitInfo wi{VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO};
     wi.semaphoreCount = 1;
     wi.pSemaphores = &timeline_;
@@ -2096,9 +2263,35 @@ void VulkanBackend::WaitTimeline(uint64_t value) {
 }
 
 uint64_t VulkanBackend::Completed() const {
+    if (!have_timeline_) {
+        while (!pending_fences_.empty() && vkGetFenceStatus(dev_, pending_fences_.front().fence) == VK_SUCCESS) {
+            fences_done_ = pending_fences_.front().value;
+            free_fences_.push_back(pending_fences_.front().fence);
+            pending_fences_.pop_front();
+        }
+        return fences_done_;
+    }
     uint64_t v = 0;
     vkGetSemaphoreCounterValue(dev_, timeline_, &v);
     return v;
+}
+
+// a fence for a submit, unsignalled, in place of the timeline semaphore's next value
+VkFence VulkanBackend::NewFence() {
+    VkFence fence = VK_NULL_HANDLE;
+    if (spare_fence_) {
+        std::swap(fence, spare_fence_);
+        return fence;
+    }
+    if (!free_fences_.empty()) {
+        fence = free_fences_.back();
+        free_fences_.pop_back();
+        vkResetFences(dev_, 1, &fence);
+        return fence;
+    }
+    VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    if (vkCreateFence(dev_, &fi, nullptr, &fence) != VK_SUCCESS) LOG_FIRST(4, "vulkan: no fence");
+    return fence;
 }
 
 // the viewport D3D12 would have: y down, the bottom edge first and the height negative
@@ -2206,6 +2399,12 @@ void VulkanBackend::EnsureRendering() {
     if (c) Transition(*c, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     if (z) Transition(*z, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
     Barrier();
+    if (!have_rendering_) {
+        BeginRenderPass(c, z);
+        rendering_ = true;
+        active_ = desired_;
+        return;
+    }
     VkRenderingAttachmentInfo ca{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     VkRenderingAttachmentInfo za{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     for (VkRenderingAttachmentInfo* a : {&ca, &za}) {
@@ -2239,8 +2438,94 @@ void VulkanBackend::EnsureRendering() {
 void VulkanBackend::EndRendering() {
     if (!rendering_) return;
     FlushRun();
-    vkCmdEndRendering(cmd_);
+    if (have_rendering_) vkCmdEndRendering(cmd_);
+    else vkCmdEndRenderPass(cmd_);
     rendering_ = false;
+}
+
+// A GPU without dynamic rendering: the same attachments by a render pass. Everything is loaded and stored and no layout
+// changes inside, the barriers before it (EnsureRendering) doing what they do for dynamic rendering, so one pass per
+// format and sample count fits every use.
+VkRenderPass VulkanBackend::RenderPassFor(VkFormat color, VkFormat depth, uint32_t samples) const {
+    uint64_t key = uint64_t(color) | uint64_t(depth) << 24 | uint64_t(samples) << 48;
+    std::lock_guard<std::mutex> lock(render_pass_lock_);
+    auto it = render_passes_.find(key);
+    if (it != render_passes_.end()) return it->second;
+    VkAttachmentDescription at[2] = {};
+    VkAttachmentReference cr{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference zr{color ? 1u : 0u, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    uint32_t n = 0;
+    auto add = [&](VkFormat format, VkImageLayout layout) {
+        VkAttachmentDescription& a = at[n++];
+        a.format = format;
+        a.samples = VkSampleCountFlagBits(samples);
+        a.loadOp = a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        a.storeOp = a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+        a.initialLayout = a.finalLayout = layout;
+    };
+    if (color) add(color, cr.layout);
+    if (depth) add(depth, zr.layout);
+    VkSubpassDescription sub{};
+    sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = color ? 1 : 0;
+    sub.pColorAttachments = &cr;
+    sub.pDepthStencilAttachment = depth ? &zr : nullptr;
+    VkRenderPassCreateInfo ci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    ci.attachmentCount = n;
+    ci.pAttachments = at;
+    ci.subpassCount = 1;
+    ci.pSubpasses = &sub;
+    VkRenderPass pass = VK_NULL_HANDLE;
+    if (vkCreateRenderPass(dev_, &ci, nullptr, &pass) != VK_SUCCESS) LOGE("vulkan: no render pass");
+    render_passes_[key] = pass;
+    return pass;
+}
+
+void VulkanBackend::BeginRenderPass(Image* c, Image* z) {
+    uint32_t w = c ? c->w : z->w;
+    uint32_t h = c ? c->h : z->h;
+    if (c && z) {
+        w = std::min(w, z->w);
+        h = std::min(h, z->h);
+    }
+    VkRenderPass pass = RenderPassFor(c ? c->format : VK_FORMAT_UNDEFINED, z ? z->format : VK_FORMAT_UNDEFINED,
+                                      uint32_t(c ? c->samples : z->samples));
+    // a framebuffer lives as long as the command buffer that uses it; one per attachments and size while that is recorded
+    FramebufferKey key{c ? c->view : VK_NULL_HANDLE, z ? z->view : VK_NULL_HANDLE, w, h};
+    VkFramebuffer fb = VK_NULL_HANDLE;
+    for (const auto& [k, v] : framebuffers_) {
+        if (k == key) {
+            fb = v;
+            break;
+        }
+    }
+    if (!fb) {
+        VkImageView views[2];
+        uint32_t n = 0;
+        if (c) views[n++] = c->view;
+        if (z) views[n++] = z->view;
+        VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        fi.renderPass = pass;
+        fi.attachmentCount = n;
+        fi.pAttachments = views;
+        fi.width = w;
+        fi.height = h;
+        fi.layers = 1;
+        if (vkCreateFramebuffer(dev_, &fi, nullptr, &fb) != VK_SUCCESS) {
+            LOG_FIRST(4, "vulkan: no framebuffer");
+            return;
+        }
+        framebuffers_.push_back({key, fb});
+        auto gone = std::make_shared<Deferred>();
+        VkDevice dev = dev_;
+        gone->release = [dev, fb] { vkDestroyFramebuffer(dev, fb, nullptr); };
+        CurrentFrame().garbage.push_back(gone);
+    }
+    VkRenderPassBeginInfo bi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    bi.renderPass = pass;
+    bi.framebuffer = fb;
+    bi.renderArea = {{0, 0}, {w, h}};
+    vkCmdBeginRenderPass(cmd_, &bi, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 void VulkanBackend::Push(const Bindings& b) {
@@ -2269,7 +2554,45 @@ void VulkanBackend::PushRaw(const Bindings& b) {
         w[kBindSampler + i].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         w[kBindSampler + i].pImageInfo = &si[i];
     }
-    vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, kBindings, w);
+    if (have_push_) {
+        vkCmdPushDescriptorSetKHR(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, kBindings, w);
+        return;
+    }
+    VkDescriptorSet set = NewDescriptorSet();
+    if (!set) return;
+    for (VkWriteDescriptorSet& x : w) x.dstSet = set;
+    vkUpdateDescriptorSets(dev_, kBindings, w, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd_, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_, 0, 1, &set, 0, nullptr);
+}
+
+// without push descriptors: a set for this push, from the frame's pools, all reset together once the GPU is past it (Begin)
+VkDescriptorSet VulkanBackend::NewDescriptorSet() {
+    constexpr uint32_t kSetsPerPool = 1024;
+    Frame& f = CurrentFrame();
+    for (;;) {
+        if (f.pool_used == f.pools.size()) {
+            VkDescriptorPoolSize sizes[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * kSetsPerPool},
+                                             {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, kBindViews * kSetsPerPool},
+                                             {VK_DESCRIPTOR_TYPE_SAMPLER, kBindViews * kSetsPerPool}};
+            VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+            pi.maxSets = kSetsPerPool;
+            pi.poolSizeCount = 3;
+            pi.pPoolSizes = sizes;
+            VkDescriptorPool pool = VK_NULL_HANDLE;
+            if (vkCreateDescriptorPool(dev_, &pi, nullptr, &pool) != VK_SUCCESS) {
+                LOG_FIRST(4, "vulkan: no descriptor pool");
+                return VK_NULL_HANDLE;
+            }
+            f.pools.push_back(pool);
+        }
+        VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        ai.descriptorPool = f.pools[f.pool_used];
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &dsl_;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        if (vkAllocateDescriptorSets(dev_, &ai, &set) == VK_SUCCESS) return set;
+        f.pool_used++;  // full: the next
+    }
 }
 
 // a resized target gives back its resources once the GPU is past them
@@ -2719,7 +3042,9 @@ VkPipeline VulkanBackend::CreateFullScreenPipeline(const Spirv& vs, const Spirv&
     ri.pColorAttachmentFormats = &d.color;
     ri.depthAttachmentFormat = d.depth ? depth_fmt_ : VK_FORMAT_UNDEFINED;
     ri.stencilAttachmentFormat = d.depth && HasStencil(depth_fmt_) ? depth_fmt_ : VK_FORMAT_UNDEFINED;
-    VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, &ri};
+    VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, have_rendering_ ? &ri : nullptr};
+    if (!have_rendering_)
+        ci.renderPass = RenderPassFor(d.color, d.depth ? depth_fmt_ : VK_FORMAT_UNDEFINED, std::max(d.samples, 1u));
     ci.pVertexInputState = &vi;
     ci.pInputAssemblyState = &ia;
     ci.pViewportState = &vp;
@@ -2837,7 +3162,7 @@ VkPipeline VulkanBackend::CreateDrawPipeline(const PsoKey& k, const Spirv& vs, c
         attr[na++] = {r, buffer, VkFormatOf(e & 0xFF), e >> 16};
         if (!((seen >> buffer) & 1)) {
             seen |= 1u << buffer;
-            bind[nb++] = {buffer, 0, VK_VERTEX_INPUT_RATE_VERTEX};
+            bind[nb++] = {buffer, have_eds_ ? 0 : k.strides[buffer], VK_VERTEX_INPUT_RATE_VERTEX};
         }
     }
     VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
@@ -2846,7 +3171,7 @@ VkPipeline VulkanBackend::CreateDrawPipeline(const PsoKey& k, const Spirv& vs, c
     vi.vertexAttributeDescriptionCount = na;
     vi.pVertexAttributeDescriptions = attr;
     VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    ia.topology = TopologyClass(k.topo);
+    ia.topology = have_eds_ ? TopologyClass(k.topo) : VkPrimitiveTopology(k.exact_topo);
     VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
     vp.viewportCount = vp.scissorCount = 1;
     // a point is drawn as its whole console pixel by the geometry shader, solid, front facing and never culled
@@ -2885,7 +3210,7 @@ VkPipeline VulkanBackend::CreateDrawPipeline(const PsoKey& k, const Spirv& vs, c
                             VK_DYNAMIC_STATE_BLEND_CONSTANTS,   VK_DYNAMIC_STATE_STENCIL_REFERENCE,
                             VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY, VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE};
     VkPipelineDynamicStateCreateInfo dy{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    dy.dynamicStateCount = uint32_t(std::size(dyn)) - (nb ? 0 : 1);
+    dy.dynamicStateCount = have_eds_ ? uint32_t(std::size(dyn)) - (nb ? 0 : 1) : 4;
     dy.pDynamicStates = dyn;
     VkFormat color = VkFormatOf(k.rtfmt);
     VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
@@ -2893,7 +3218,10 @@ VkPipeline VulkanBackend::CreateDrawPipeline(const PsoKey& k, const Spirv& vs, c
     ri.pColorAttachmentFormats = &color;
     ri.depthAttachmentFormat = k.has_ds ? depth_fmt_ : VK_FORMAT_UNDEFINED;
     ri.stencilAttachmentFormat = k.has_ds && HasStencil(depth_fmt_) ? depth_fmt_ : VK_FORMAT_UNDEFINED;
-    VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, &ri};
+    VkGraphicsPipelineCreateInfo ci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, have_rendering_ ? &ri : nullptr};
+    if (!have_rendering_)
+        ci.renderPass = RenderPassFor(k.has_rt ? color : VK_FORMAT_UNDEFINED, k.has_ds ? depth_fmt_ : VK_FORMAT_UNDEFINED,
+                                      std::max(k.samples, 1u));
     ci.pVertexInputState = &vi;
     ci.pInputAssemblyState = &ia;
     ci.pViewportState = &vp;
@@ -3683,7 +4011,7 @@ void VulkanBackend::UploadVertexBuffers(const Assembled& a) {
         sizes[i] = bytes;
         strides[i] = b.stride;
     }
-    vkCmdBindVertexBuffers2(cmd_, 0, a.buffer_count, bufs, offs, sizes, strides);
+    BindVertexBuffers(a.buffer_count, bufs, offs, sizes, strides);
 }
 
 void VulkanBackend::DrawGeometry(const Assembled& a) {
@@ -3792,11 +4120,8 @@ void VulkanBackend::FlushRun() {
         strides[i] = run_.strides[i];
         run_.data[i].clear();
     }
-    vkCmdBindVertexBuffers2(cmd_, 0, run_.buffers, bufs, offs, sizes, strides);
-    if (run_.topo != drawn_.topo) {
-        vkCmdSetPrimitiveTopology(cmd_, VkPrimitiveTopology(run_.topo));
-        drawn_.topo = run_.topo;
-    }
+    BindVertexBuffers(run_.buffers, bufs, offs, sizes, strides);
+    if (run_.topo != drawn_.topo) SetTopology(run_.topo);
     uint32_t ibytes = uint32_t(run_.indices.size() * 4);
     Alloc ib = Upload(ibytes, 4);
     std::memcpy(ib.cpu, run_.indices.data(), ibytes);
@@ -3836,6 +4161,11 @@ bool VulkanBackend::ReuseRun(const State& s) {
     if (CurrentFrame().used > kUploadSize - kUploadReserve) return false;
     if (bound_rt_ != kept_.rt || bound_ds_ != kept_.ds || bound_ms_ != kept_.ms || (!bound_rt_ && !bound_ds_))
         return false;
+    if (!have_eds_) {
+        if (r.buffers != kept_.buffer_count) return false;
+        for (uint32_t i = 0; i < r.buffers; i++)
+            if (r.strides[i] != kept_.strides[i]) return false;
+    }
     FlushRun();
     EnsureRendering();
     if (kept_.pso != drawn_.pso) {
@@ -3852,11 +4182,8 @@ bool VulkanBackend::ReuseRun(const State& s) {
     }
     SetViewportScissor(s, kept_.size.w);
     SetBlendFactorStencilRef(s);
-    vkCmdBindVertexBuffers2(cmd_, 0, r.buffers, r.bufs, r.offs, r.sizes, r.strides);
-    if (r.topo != drawn_.topo) {
-        vkCmdSetPrimitiveTopology(cmd_, VkPrimitiveTopology(r.topo));
-        drawn_.topo = r.topo;
-    }
+    BindVertexBuffers(r.buffers, r.bufs, r.offs, r.sizes, r.strides);
+    if (r.topo != drawn_.topo) SetTopology(r.topo);
     vkCmdBindIndexBuffer(cmd_, r.ib, r.ioff, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cmd_, r.count, 1, 0, 0, 0);
     skip_to_ = r.last;
@@ -3867,10 +4194,7 @@ bool VulkanBackend::ReuseRun(const State& s) {
 
 void VulkanBackend::BindGeometry(const Assembled& a) {
     UploadVertexBuffers(a);
-    if (int topo = int(PrimitiveTopology(a)); topo != drawn_.topo) {
-        vkCmdSetPrimitiveTopology(cmd_, VkPrimitiveTopology(topo));
-        drawn_.topo = topo;
-    }
+    if (int topo = int(PrimitiveTopology(a)); topo != drawn_.topo) SetTopology(topo);
     if (a.index_count) {
         uint32_t ibytes = a.index_count * (a.index16 ? 2 : 4);
         Alloc ib = Upload(ibytes, 4);
@@ -3939,7 +4263,7 @@ bool VulkanBackend::EnsureQueries() {
         LOG_FIRST(1, "vulkan: no occlusion queries, visibility tests stay pending");
         return false;
     }
-    vkResetQueryPool(dev_, query_pool_, 0, kQueries);
+    if (have_host_reset_) vkResetQueryPool(dev_, query_pool_, 0, kQueries);
     return true;
 }
 
@@ -3950,7 +4274,19 @@ uint32_t VulkanBackend::BeginCountedDraw(const State& s) {
     uint32_t query = query_next_++ % kQueries;
     frame_counted_++;
     // its last use was frames ago, done by now
-    vkResetQueryPool(dev_, query_pool_, query, 1);
+    if (have_host_reset_) {
+        vkResetQueryPool(dev_, query_pool_, query, 1);
+    } else if (query == 0 || query >= query_reset_end_) {
+        // only outside a render pass: a batch of them, so this ends a pass once in many counted draws. A pass begun again
+        // keeps the pipeline and the dynamic state already set
+        constexpr uint32_t kResetBatch = 64;
+        bool in_pass = rendering_;
+        EndRendering();
+        uint32_t batch = std::min(kResetBatch, kQueries - query);
+        vkCmdResetQueryPool(cmd_, query_pool_, query, batch);
+        query_reset_end_ = query + batch;
+        if (in_pass) EnsureRendering();
+    }
     vkCmdBeginQuery(cmd_, query_pool_, query, precise_ ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
     return query;
 }
@@ -4288,6 +4624,10 @@ void VulkanBackend::Draw(const State& s, uint32_t prim, uint32_t start, uint32_t
     // pipeline
     PsoKey k;
     BuildPipelineKey(s, a, sh.vh, sh.ph, k);
+    if (!have_eds_) {
+        k.exact_topo = uint32_t(PrimitiveTopology(a));
+        for (uint32_t i = 0; i < a.buffer_count; i++) k.strides[i] = a.buffers[i].stride;
+    }
     // ProgramShading::depth_alpha: the depth goes in a pass of its own after the colour, where it isn't faint; and so
     // does a g_surface_depth surface's, which the title draws without
     VkPipeline zpso = VK_NULL_HANDLE;
@@ -4421,6 +4761,8 @@ void VulkanBackend::KeepDraw(const Assembled& a, const DrawShaders& sh, const Dr
     kept_.strip = a.strip;
     kept_.pretransformed = a.pretransformed;
     kept_.elements = a.elements;
+    kept_.buffer_count = a.buffer_count;
+    for (uint32_t i = 0; i < a.buffer_count; i++) kept_.strides[i] = a.buffers[i].stride;
 }
 
 // a draw whose state is the kept draw's but for its vertices and constants: false, nothing recorded, when anything it
@@ -4444,6 +4786,11 @@ bool VulkanBackend::FastDraw(const State& s, uint32_t prim, uint32_t start, uint
         if (!(a.regs >> r & 1)) continue;
         const VertexElement &x = a.elements[size_t(r)], &y = kept_.elements[size_t(r)];
         if (x.format != y.format || x.buffer != y.buffer || x.offset != y.offset) return false;
+    }
+    if (!have_eds_) {
+        if (a.buffer_count != kept_.buffer_count) return false;
+        for (uint32_t i = 0; i < a.buffer_count; i++)
+            if (a.buffers[i].stride != kept_.strides[i]) return false;
     }
     bool quad = count <= kQuadVertices && !s.rs[kRsZEnable] && a.topology != Topology::Points;
     if (quad != kept_.quad) return false;

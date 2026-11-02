@@ -18,8 +18,14 @@ enum class DisplayMode : uint32_t { Fullscreen, Borderless, Windowed };
 struct Settings {
     DisplayMode display_mode = DisplayMode::Borderless;
     uint32_t width = 0, height = 0;  // 0 is the desktop mode
+#ifdef __ANDROID__
+    // a phone's panel is often past what its GPU draws at 30 FPS; the menu raises it
+    uint32_t render_percent = 50;    // of the output height
+    uint32_t fps_cap = 30;           // 0 unlimited
+#else
     uint32_t render_percent = 100;   // of the output height
     uint32_t fps_cap = 60;           // 0 unlimited
+#endif
     bool vsync = true;
     // pictures shown per frame the title presents: 1 (off), or 2 to 4, the ones between made from the frames around
     // them; the title sets it (Conker from its frame rate), it isn't saved
