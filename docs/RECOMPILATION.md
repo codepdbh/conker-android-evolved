@@ -21,7 +21,15 @@ python scripts\validate_game.py <iso, carpeta o default.xbe>
 
 Solo el SHA-1 exacto cuenta como soportado. El resto es evidencia, no equivalencia.
 
-## La copia actual: `unverified-variant`
+## Las copias probadas
+
+`Conker.iso` es `supported`: SHA-1 `2232a1b3874d67b4bb4cf53a940420d2dab59535`, el disco USA, 880 archivos y seis idiomas de texto (inglés,
+español, francés, alemán, italiano y japonés). Con el `.ready` que escribe el launcher son los 881 archivos que cita upstream.
+
+La copia de abajo es la primera con la que se trabajó. Le faltan 390 archivos: 389 de texto de los otros idiomas y `update.xbe`.
+Los archivos que comparte con `Conker.iso` tienen el mismo tamaño. Pedir otro idioma con ella lleva a la pantalla de datos ausentes.
+
+### Copia recortada: `unverified-variant`
 
 SHA-1 de `default.xbe`: `bef166b2d2f72fef6bc051fd7bc36caadada0b54`. Región `0x7`, medios `0x400001FF`, versión 2, enlazado el
 2005-04-28.

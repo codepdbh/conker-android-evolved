@@ -3053,7 +3053,12 @@ VkPipeline VulkanBackend::CreatePipeline(VkGraphicsPipelineCreateInfo& ci, const
     ci.stageCount = n;
     ci.pStages = si;
     ci.layout = layout_;
-    if (made && vkCreateGraphicsPipelines(dev_, VK_NULL_HANDLE, 1, &ci, nullptr, &p) != VK_SUCCESS) p = VK_NULL_HANDLE;
+    if (made) {
+        if (VkResult r = vkCreateGraphicsPipelines(dev_, VK_NULL_HANDLE, 1, &ci, nullptr, &p); r != VK_SUCCESS) {
+            LOGE("vulkan: pipeline refused (%d): %u stages", int(r), n);
+            p = VK_NULL_HANDLE;
+        }
+    }
     for (VkShaderModule m : modules) {
         if (m) vkDestroyShaderModule(dev_, m, nullptr);
     }
@@ -3365,7 +3370,7 @@ VkPipeline VulkanBackend::FindPipeline(const PsoKey& k, const DrawShaders& sh) {
         g_perf.psos++;
         auto t = std::chrono::steady_clock::now();
         pso = CreateDrawPipeline(k, *sh.vs_code, *sh.ps_code, gs, hs, ds);
-        if (!pso) LOGE("vulkan: pipeline creation failed");
+        if (!pso) LOGE("vulkan: pipeline creation failed: topology %u (%u), stride %u, regs %X, fill %u, blend %u", k.topo, k.exact_topo, k.strides[0], k.regs, k.fill, k.blend);
         if (double ms = SinceMs(t); ms > 20) LOGR("vulkan: pipeline creation took %.0f ms", ms);
     }
     psos_[h] = pso;

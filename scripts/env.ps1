@@ -1,5 +1,7 @@
 # The tools every script here uses, found the same way. Dot-source it: . "$PSScriptRoot\env.ps1"
-$ErrorActionPreference = 'Stop'
+# not Stop: Windows PowerShell takes any line a tool writes to stderr, as CMake's warnings, for a failure. Each script reads
+# $LASTEXITCODE and throws
+$ErrorActionPreference = 'Continue'
 $script:Root = Split-Path -Parent $PSScriptRoot
 $NdkVersion = '28.2.13676358'
 $CMakeVersion = '3.31.6'

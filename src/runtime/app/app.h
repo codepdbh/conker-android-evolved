@@ -27,6 +27,7 @@ struct Settings {
     uint32_t fps_cap = 60;           // 0 unlimited
 #endif
     bool vsync = true;
+    uint32_t game_language = 1;      // XC_LANGUAGE: 1 English, 2 Japanese, 3 German, 4 French, 5 Spanish, 6 Italian
     // pictures shown per frame the title presents: 1 (off), or 2 to 4, the ones between made from the frames around
     // them; the title sets it (Conker from its frame rate), it isn't saved
     uint32_t frame_generation = 1;

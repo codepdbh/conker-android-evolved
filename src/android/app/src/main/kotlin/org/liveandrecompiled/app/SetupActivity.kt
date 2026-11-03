@@ -47,6 +47,9 @@ class SetupActivity : Activity() {
     private lateinit var play: Button
     private lateinit var pick: List<Button>
     private lateinit var fps: List<Button>
+    private lateinit var gameLanguages: LinearLayout
+    private lateinit var gameLanguageNote: TextView
+    private lateinit var choice: (String, () -> Unit) -> Button
     private lateinit var quality: List<Button>
     private lateinit var driver: TextView
     private lateinit var gamepad: TextView
@@ -230,11 +233,13 @@ class SetupActivity : Activity() {
                 setPadding(0, dp(8), 0, 0)
             }))
         sidePane.addView(panel(label(Lang.t("Idioma", "Language", "Idioma")), languageRow,
-            text(Lang.t("Cambia el launcher y el menú del juego. El juego sigue en inglés.",
-                "Changes the launcher and the game's menu. The game stays in English.",
-                "Muda o launcher e o menu do jogo. O jogo continua em inglês."), 13f, color = MUTED).apply {
+            text(Lang.t("Cambia el launcher y el menú del juego.", "Changes the launcher and the game's menu.", "Muda o launcher e o menu do jogo."), 13f, color = MUTED).apply {
                 setPadding(0, dp(8), 0, 0)
             }))
+        gameLanguages = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        gameLanguageNote = text("", 13f, color = MUTED).apply { setPadding(0, dp(8), 0, 0) }
+        choice = { name, action -> button(name, action = action) }
+        sidePane.addView(panel(label(Lang.t("Idioma del juego", "Game language", "Idioma do jogo")), gameLanguages, gameLanguageNote))
         sidePane.addView(panel(label(Lang.t("Driver gráfico", "Graphics driver", "Driver gráfico")), driver,
             button(Lang.t("Elegir driver", "Choose driver", "Escolher driver")) { chooseDriver() },
             button(Lang.t("Importar driver (.zip)", "Import driver (.zip)", "Importar driver (.zip)")) {
@@ -317,6 +322,7 @@ class SetupActivity : Activity() {
             b.background = buttonBackground(on)
             b.setTextColor(if (on) ON_ACCENT else Color.WHITE)
         }
+        showGameLanguages()
         val preset = Quality.current(this)
         quality.forEachIndexed { i, b ->
             val on = Quality.entries[i] == preset
@@ -352,6 +358,39 @@ class SetupActivity : Activity() {
             crash.visibility = View.VISIBLE
         } else {
             crash.visibility = View.GONE
+        }
+    }
+
+    // three to a row, what the installed copy holds
+    private fun showGameLanguages() {
+        gameLanguages.removeAllViews()
+        val languages = GameLanguage.installed(this)
+        val current = GameLanguage.get(this)
+        languages.chunked(3).forEach { row ->
+            val line = LinearLayout(this)
+            row.forEach { language ->
+                line.addView(choice(language.name) {
+                    GameLanguage.set(this, language.code)
+                    refresh()
+                }.apply {
+                    val on = language.code == current
+                    background = buttonBackground(on)
+                    setTextColor(if (on) ON_ACCENT else Color.WHITE)
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply {
+                        topMargin = dp(8)
+                        marginEnd = if (language === row.last()) 0 else dp(8)
+                    }
+                })
+            }
+            repeat(3 - row.size) { line.addView(View(this), LinearLayout.LayoutParams(0, 0, 1f)) }
+            gameLanguages.addView(line)
+        }
+        gameLanguageNote.text = when {
+            languages.isEmpty() -> Lang.t("Instala tu copia para elegirlo.", "Install your copy to choose it.", "Instale sua cópia para escolher.")
+            languages.size == 1 -> Lang.t("Tu copia solo trae este idioma.", "Your copy only has this language.", "Sua cópia só traz este idioma.")
+            else -> Lang.t("Los textos del juego. Las voces son siempre las del disco. Se aplica al abrir el juego.",
+                "The game's text. The voices are always the disc's. It applies when the game opens.",
+                "Os textos do jogo. As vozes são sempre as do disco. Vale ao abrir o jogo.")
         }
     }
 
@@ -539,6 +578,7 @@ class SetupActivity : Activity() {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 bar.visibility = View.GONE
                 pick.forEach { it.isEnabled = true }
+                if (error.isEmpty()) GameLanguage.followApp(this)
                 say(error.ifEmpty { Lang.t("Juego instalado.", "Game installed.", "Jogo instalado.") })
                 refresh()
             }

@@ -59,6 +59,41 @@ object Lang {
     }
 }
 
+// The language the game itself runs in, as the console's settings would say it (XC_LANGUAGE, settings.toml game_language).
+// A cut down copy may hold English alone, and the game hangs on its missing-data screen asking for a language it lacks: only
+// the ones with their folder in the installed copy are offered, or kept.
+object GameLanguage {
+    class Entry(val code: Int, val folder: String, val name: String)
+
+    private const val KEY = "game_language"
+    private const val ENGLISH = 1
+    private val ALL = listOf(Entry(5, "Spanish", "Español"), Entry(ENGLISH, "English", "English"), Entry(4, "French", "Français"),
+        Entry(3, "German", "Deutsch"), Entry(6, "Italian", "Italiano"), Entry(2, "Japanese", "日本語"))
+
+    fun installed(context: Context): List<Entry> {
+        val folders = File(context.filesDir, "assets/dvddata/aid/text").list().orEmpty().map { it.lowercase() }
+        return ALL.filter { it.folder.lowercase() in folders }
+    }
+
+    fun get(context: Context) = GameSettings.get(context, KEY)?.toIntOrNull() ?: ENGLISH
+
+    fun set(context: Context, code: Int) = GameSettings.set(context, mapOf(KEY to code))
+
+    // before the game starts: never a language its copy lacks
+    fun sanitize(context: Context) {
+        if (installed(context).none { it.code == get(context) }) set(context, ENGLISH)
+    }
+
+    // a copy just installed: the language of the launcher, when the copy has it
+    fun followApp(context: Context) {
+        val wanted = when (Lang.current) {
+            0 -> 5
+            else -> ENGLISH
+        }
+        set(context, if (installed(context).any { it.code == wanted }) wanted else ENGLISH)
+    }
+}
+
 object FrameRate {
     val CHOICES = listOf(30, 60)
     private const val KEY = "frame_rate"

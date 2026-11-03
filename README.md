@@ -1,7 +1,7 @@
 # Conker: Live & Reloaded — Android Evolved
 
 Port experimental a Android ARM64 por recompilación estática, sin emulador. **Todavía no es jugable:** el juego arranca en un
-Redmi Note 8 y un Samsung S25 Ultra y dibuja sus escenas y menús, pero empezar una partida se ha colgado a veces en la pantalla de carga.
+Redmi Note 8 y un Samsung S25 Ultra y dibuja sus escenas y menús, y ya carga niveles con el disco USA, pero falta jugar más y algunos efectos no se dibujan en Vulkan 1.1.
 El estado de cada parte está en [docs/PROGRESS.md](docs/PROGRESS.md).
 
 | Parte | Estado |
@@ -9,7 +9,8 @@ El estado de cada parte está en [docs/PROGRESS.md](docs/PROGRESS.md).
 | `libmain.so` para ARM64 | Arranca en un Redmi Note 8 |
 | Launcher: compatibilidad, instalar la copia e informe de logs | Probado en un Redmi Note 8 |
 | HUD táctil en el juego | Botones y cruceta probados |
-| Menú del juego y launcher en español, inglés y portugués | Probados; el juego sigue en inglés |
+| Menú del juego y launcher en español, inglés y portugués | Probados |
+| Idioma del juego, según lo que traiga tu copia | Elegido sin cuelgues en español; textos sin revisar |
 | Drivers importados, mandos físicos, informes a GitHub | Escritos, sin probar |
 | Editor del HUD | Abre; arrastrar, guardar y multitáctil sin probar |
 | Renderer con alternativas para Vulkan 1.1 | Dibuja en Adreno 610; sin revisar en partida |

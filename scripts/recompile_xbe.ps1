@@ -10,6 +10,7 @@ $verdict = $LASTEXITCODE
 if ($verdict -eq 2) { throw 'the XBE is unusable' }
 cmake -DWHAT=zig-windows -P tools\configure.cmake
 cmake --build out\build\zig-windows --target xbe_recomp xbe_symbols
+if ($LASTEXITCODE) { throw "the recompiler's build failed ($LASTEXITCODE)" }
 if ($verdict -eq 3) {
     New-Item -ItemType Directory -Force out\compare | Out-Null
     & out\build\zig-windows\xbe_symbols.exe $xbe src\runtime\xdk --out out\compare\game.toml --name game *> out\compare\xbe_symbols.log

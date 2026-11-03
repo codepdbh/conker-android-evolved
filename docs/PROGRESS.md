@@ -8,7 +8,7 @@ Léelo primero al retomar el trabajo. Cada línea dice si algo está **probado**
 |---|---|
 | A. Estructura preparada | Hecho, salvo abrirlo en Android Studio (sin comprobar) |
 | B. Host Android funcional | Probado en un Redmi Note 8 |
-| C. Recompilación integrada | Probado con una copia no verificada: el juego corre en ARM64 |
+| C. Recompilación integrada | Probado con el disco USA soportado: el juego corre en ARM64 |
 | D. Primer arranque jugable | En curso: arranca, dibuja y responde a los controles; falta jugar una partida |
 | E. Port estable | Sin empezar |
 
@@ -71,9 +71,8 @@ Medido en el Samsung:
 
 - 60 FPS estables, con 8-10 ms por fotograma en el hilo de render, a resolución 100 %.
 - 120 FPS con fotogramas generados: bajó a 37 FPS. Por eso el launcher y el menú ofrecen solo 30 y 60.
-- `game_language = 5` (español) lleva a la pantalla de datos ausentes a los 0,4 s del arranque. Esta copia no admite ese idioma, y la
-  opción se retiró del juego. Solo se probó el español. Puede tener relación con el cuelgue (fallo abierto 1) y con los 490 archivos de
-  esta copia frente a los 881 que cita upstream: **sin comprobar**.
+- `game_language = 5` (español) con la copia recortada lleva a la pantalla de datos ausentes a los 0,4 s del arranque: esa copia solo trae
+  textos en inglés. Por eso el launcher ofrece solo los idiomas instalados.
 
 Solo compilado, sin ejecutar: importar y usar un driver (`Drivers.kt`, `gpudriver.cpp`, `LoadVulkan`), reportar en GitHub (`Issue.kt`), el
 los mandos físicos (sin mando a mano) y su atajo Guide o Start+Back, el efecto de los ajustes de calidad y
@@ -83,11 +82,16 @@ abre sus hooks por ruta; `tools/package-android.cmake` y `src/apkbuilder/` no in
 Red: Xbox Live no existe en el runtime (`xnet.cpp`). System Link sí, sin probar; en el Redmi `bind` al puerto 1001 falló con 10013, que
 parece el límite de Android para puertos menores de 1024.
 
+Con `Conker.iso`, el disco USA soportado, en el Redmi Note 8: se instala desde el launcher (881 archivos) y el usuario cargó ThroneRoom, Windmill
+y TrainingLevel, con Conker en pantalla. El launcher ofrece solo los idiomas que trae la copia instalada (`GameLanguage`). Sin ver: el
+texto del juego en cada idioma.
+
 Fallos abiertos:
 
-1. Empezar una partida cuelga en "Loading...": un hilo queda en `sub_001F04F0`, la pantalla de datos ausentes del juego, que es un
-   bucle infinito. Causa sin encontrar. El juego ahora registra quién la llamó (`missing-data screen` en el log), pero el cuelgue
-   no se ha vuelto a reproducir con ese registro. **No se ha jugado ninguna partida controlando al personaje.**
+0. En el Redmi, `vulkan: pipeline creation failed` aparece al cargar niveles: esos draws no se dibujan. El log ya dirá el motivo y el draw.
+
+1. Con la copia recortada, empezar una partida colgaba en la pantalla de datos ausentes (`sub_001F04F0`). Con `Conker.iso` no se ha repetido, en
+   una sola sesión: sin confirmar que fuese por la copia. **Falta jugar más.**
 2. Los gráficos siguen por revisar con el juego en marcha: el usuario los vio mal antes de la corrección de barreras. Render al 50 %.
 3. Sin comparar con PC: no se sabe qué fallos gráficos son propios de Android.
 

@@ -59,6 +59,7 @@ void Load() {
     s.render_percent = t["render_percent"].value_or(s.render_percent);
     s.fps_cap = t["fps_cap"].value_or(s.fps_cap);
     s.vsync = t["vsync"].value_or(s.vsync);
+    s.game_language = t["game_language"].value_or(s.game_language);
     s.aniso = t["anisotropic_filtering"].value_or(s.aniso);
     s.msaa = t["msaa"].value_or(s.msaa);
     s.smaa = t["smaa"].value_or(s.smaa);
@@ -111,6 +112,7 @@ toml::table Table() {
                   {"renderer", s.renderer},
                   {"aspect", s.aspect},
                   {"join_ip", s.join_ip},
+                  {"game_language", int64_t(s.game_language)},
                   {"auto_controllers", input::AutoAssign()}};
     for (int p = 0; p < input::kPorts; p++) {
         toml::table player;

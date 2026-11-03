@@ -545,7 +545,7 @@ void MenuLanguage() {
     const char* const kLanguages[] = {"Español", "English", "Português"};
     int language = int(g_menu_language);
     if (MenuChoice(Tr("Este menú y el launcher", "This menu and the launcher", "Este menu e o launcher"), kLanguages, 3, language,
-                   Tr("El juego sigue en inglés.", "The game stays in English.", "O jogo continua em inglês.")))
+                   Tr("El idioma del juego se elige en el launcher.", "The game's language is chosen in the launcher.", "O idioma do jogo é escolhido no launcher.")))
         g_menu_language = uint32_t(language);
 }
 
