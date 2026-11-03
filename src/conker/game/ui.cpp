@@ -540,13 +540,18 @@ void MenuSound(app::Settings& s) {
     MenuSwitch(Tr("Silenciar en segundo plano", "Mute in background", "Silenciar em segundo plano"), &s.mute_in_background);
 }
 
+void MenuLanguage() {
+    MenuTitle(Tr("Idioma", "Language", "Idioma"));
+    const char* const kLanguages[] = {"Español", "English", "Português"};
+    int language = int(g_menu_language);
+    if (MenuChoice(Tr("Este menú y el launcher", "This menu and the launcher", "Este menu e o launcher"), kLanguages, 3, language,
+                   Tr("El juego sigue en inglés.", "The game stays in English.", "O jogo continua em inglês.")))
+        g_menu_language = uint32_t(language);
+}
+
 void MenuTools() {
     MenuTitle(Tr("Herramientas", "Tools", "Ferramentas"));
     MenuSwitch(Tr("Mostrar FPS", "Show FPS", "Mostrar FPS"), &g_fps_overlay);
-    const char* const kLanguages[] = {"Español", "English", "Português"};
-    int language = int(g_menu_language);
-    if (MenuChoice(Tr("Idioma del menú", "Menu language", "Idioma do menu"), kLanguages, 3, language))
-        g_menu_language = uint32_t(language);
     DrawWarp();
 }
 
@@ -569,17 +574,17 @@ void DrawTouchMenu(app::Settings& s) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
     if (ImGui::Begin("##menu", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
         static int page = 0;
-        const char* const kPages[] = {Tr("Gráficos", "Graphics", "Gráficos"), Tr("Mejoras", "Enhancements", "Melhorias"), Tr("Sonido", "Sound", "Som"), Tr("Herramientas", "Tools", "Ferramentas")};
+        const char* const kPages[] = {Tr("Gráficos", "Graphics", "Gráficos"), Tr("Mejoras", "Enhancements", "Melhorias"), Tr("Sonido", "Sound", "Som"), Tr("Idioma", "Language", "Idioma"), Tr("Herramientas", "Tools", "Ferramentas")};
         const float side = std::min(display.x * 0.24f, font * 10.0f);
         const float row = ImGui::GetFrameHeight();
         ImGui::BeginChild("##side", ImVec2(side, 0));
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 5; i++)
             if (MenuButton(kPages[i], i == page, ImVec2(-1, row * 1.2f))) page = i;
         // to the bottom of the column
         const float foot = row * 2.0f + ImGui::GetStyle().ItemSpacing.y;
         ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetContentRegionMax().y - foot));
         if (MenuButton(Tr("Volver al juego", "Back to the game", "Voltar ao jogo"), true, ImVec2(-1, row))) Close();
-        if (MenuButton("Salir del juego", false, ImVec2(-1, row))) ImGui::OpenPopup("##quit");
+        if (MenuButton(Tr("Salir del juego", "Quit the game", "Sair do jogo"), false, ImVec2(-1, row))) ImGui::OpenPopup("##quit");
         ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::SetNextWindowSize(ImVec2(std::min(display.x * 0.6f, font * 24.0f), 0));
         if (ImGui::BeginPopupModal("##quit", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove)) {
@@ -598,6 +603,7 @@ void DrawTouchMenu(app::Settings& s) {
             case 0: MenuGraphics(s); break;
             case 1: MenuEnhancements(); break;
             case 2: MenuSound(s); break;
+            case 3: MenuLanguage(); break;
             default: MenuTools(); break;
         }
         // ImGui scrolls by wheel and bar: here by the finger, anywhere on the page

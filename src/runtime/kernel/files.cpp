@@ -232,6 +232,12 @@ std::string QuerySymbolicLink(const std::string& link) {
 
 namespace {
 
+// in the log of any run: the game's missing-data screen looks like a hang, and this says what it wanted
+void LogMissing(const std::string& name) {
+    static std::atomic<int> told{0};
+    if (told.fetch_add(1, std::memory_order_relaxed) < 200) LOGR("missing %s", name.c_str());
+}
+
 struct Target {
     std::string host;                    // empty on the disc image or unmapped
     bool disc = false;                   // on the mounted disc image
@@ -284,7 +290,7 @@ Target Resolve(const std::string& xbox_path, uint32_t root_handle) {
 uint32_t OpenOnDisc(const Disc::Entry* e, const std::string& name, uint32_t handle_out, uint32_t iosb, uint32_t disposition,
                     uint32_t options) {
     if (!e && (disposition == 1 || disposition == 4)) {  // FILE_OPEN or FILE_OVERWRITE need an existing file
-        LOG_FIRST(200, "missing %s", name.c_str());
+        LogMissing(name);
         IoStatus(iosb, kObjectNameNotFound, 5);
         return kObjectNameNotFound;
     }
@@ -377,7 +383,7 @@ KERNEL_EXPORT(190, NtCreateFile, 9) {
             break;
         case 1:  // open
             if (!exists) {
-                LOG_FIRST(200, "missing %s", name.c_str());
+                LogMissing(name);
                 IoStatus(iosb, kObjectNameNotFound, 5);
                 return kObjectNameNotFound;
             }
@@ -440,7 +446,7 @@ KERNEL_EXPORT(202, NtOpenFile, 6) {
     const std::string& host = t.host;
     std::error_code ec;
     if (host.empty() || !fs::exists(host, ec)) {
-        LOG_FIRST(200, "missing %s", name.c_str());
+        LogMissing(name);
         IoStatus(iosb, kObjectNameNotFound, 5);
         return host.empty() ? kObjectPathNotFound : kObjectNameNotFound;
     }
@@ -769,7 +775,7 @@ KERNEL_EXPORT(210, NtQueryFullAttributesFile, 2) {
     Target t = Resolve(name, R32(a[0]));
     std::error_code ec;
     if (t.disc ? !t.entry : t.host.empty() || !fs::exists(t.host, ec)) {
-        LOG_FIRST(200, "missing %s", name.c_str());
+        LogMissing(name);
         return kObjectNameNotFound;
     }
     if (t.disc) FillNetworkInfo(a[1], *t.entry);

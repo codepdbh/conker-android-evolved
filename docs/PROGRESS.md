@@ -63,6 +63,10 @@ Menú táctil nuevo en Android (`DrawTouchMenu`, `ui.cpp`): se abre con atrás, 
 
 Probado en el Samsung: FPS y calidad se guardan desde el launcher, y su idioma cambia (español, inglés, portugués).
 
+Probado en el Redmi Note 8 con la versión final: 30 FPS estables a resolución 50 %, tanto en la demo como en `Mp_Frontend`, con 350 MB de
+RAM. El menú del juego se lee entero. El launcher en dos columnas en horizontal. El menú táctil: secciones, idioma y volver al juego. El
+botón de menú no se ve al jugar.
+
 Medido en el Samsung:
 
 - 60 FPS estables, con 8-10 ms por fotograma en el hilo de render, a resolución 100 %.
@@ -72,7 +76,7 @@ Medido en el Samsung:
   esta copia frente a los 881 que cita upstream: **sin comprobar**.
 
 Solo compilado, sin ejecutar: importar y usar un driver (`Drivers.kt`, `gpudriver.cpp`, `LoadVulkan`), reportar en GitHub (`Issue.kt`), el
-botón de menú oculto (`touch.cpp`), los mandos físicos (sin mando a mano) y su atajo Guide o Start+Back, el efecto de los ajustes de calidad y
+los mandos físicos (sin mando a mano) y su atajo Guide o Start+Back, el efecto de los ajustes de calidad y
 del ritmo sin espera activa (`Pace`, `TellScreenRate`). Las bibliotecas nativas se desempaquetan ahora al instalar, porque libadrenotools
 abre sus hooks por ruta; `tools/package-android.cmake` y `src/apkbuilder/` no incluyen estas bibliotecas.
 
@@ -85,9 +89,7 @@ Fallos abiertos:
    bucle infinito. Causa sin encontrar. El juego ahora registra quién la llamó (`missing-data screen` en el log), pero el cuelgue
    no se ha vuelto a reproducir con ese registro. **No se ha jugado ninguna partida controlando al personaje.**
 2. Los gráficos siguen por revisar con el juego en marcha: el usuario los vio mal antes de la corrección de barreras. Render al 50 %.
-3. El menú se vio legible con la corrección de barreras y el cambio en `Busy()` que luego se revirtió. La versión sin ese cambio
-   compila e instala, pero su menú **no se ha visto**.
-4. Sin comparar con PC: no se sabe qué fallos gráficos son propios de Android.
+3. Sin comparar con PC: no se sabe qué fallos gráficos son propios de Android.
 
 Diagnóstico en el teléfono: `files/debug_env.txt` admite una línea `XBE_...=valor` por variable (`XBE_VERBOSE=1`,
 `XBE_CAPTURE_DIR=captures`). Con esta última, F3 (`adb shell input keyevent KEYCODE_F3`) guarda un fotograma en el almacenamiento de

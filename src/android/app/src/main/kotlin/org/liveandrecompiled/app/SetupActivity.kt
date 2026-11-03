@@ -229,7 +229,12 @@ class SetupActivity : Activity() {
             text(Lang.t("Rendimiento es lo más rápido, para teléfonos modestos. Se aplica al abrir el juego.", "Performance is fastest, for modest phones. It applies when the game opens.", "Desempenho é o mais rápido, para telefones modestos. Vale ao abrir o jogo."), 13f, color = MUTED).apply {
                 setPadding(0, dp(8), 0, 0)
             }))
-        sidePane.addView(panel(label(Lang.t("Idioma", "Language", "Idioma")), languageRow))
+        sidePane.addView(panel(label(Lang.t("Idioma", "Language", "Idioma")), languageRow,
+            text(Lang.t("Cambia el launcher y el menú del juego. El juego sigue en inglés.",
+                "Changes the launcher and the game's menu. The game stays in English.",
+                "Muda o launcher e o menu do jogo. O jogo continua em inglês."), 13f, color = MUTED).apply {
+                setPadding(0, dp(8), 0, 0)
+            }))
         sidePane.addView(panel(label(Lang.t("Driver gráfico", "Graphics driver", "Driver gráfico")), driver,
             button(Lang.t("Elegir driver", "Choose driver", "Escolher driver")) { chooseDriver() },
             button(Lang.t("Importar driver (.zip)", "Import driver (.zip)", "Importar driver (.zip)")) {

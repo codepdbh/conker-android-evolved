@@ -9,6 +9,8 @@ El estado de cada parte está en [docs/PROGRESS.md](docs/PROGRESS.md).
 | `libmain.so` para ARM64 | Arranca en un Redmi Note 8 |
 | Launcher: compatibilidad, instalar la copia e informe de logs | Probado en un Redmi Note 8 |
 | HUD táctil en el juego | Botones y cruceta probados |
+| Menú del juego y launcher en español, inglés y portugués | Probados; el juego sigue en inglés |
+| Drivers importados, mandos físicos, informes a GitHub | Escritos, sin probar |
 | Editor del HUD | Abre; arrastrar, guardar y multitáctil sin probar |
 | Renderer con alternativas para Vulkan 1.1 | Dibuja en Adreno 610; sin revisar en partida |
 | Mali y Xclipse (Helio, Dimensity, Exynos) | Sin probar, no hay dispositivos |
