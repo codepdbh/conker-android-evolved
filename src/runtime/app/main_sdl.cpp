@@ -576,7 +576,16 @@ int main(int argc, char** argv) {
 
     for (;;) {
         SDL_Event e;
+#ifdef __ANDROID__
+        // SDL's wait spins on Android, a whole core taken from the game on a phone
+        if (!SDL_PollEvent(&e)) {
+            SDL_Delay(4);
+            continue;
+        }
+        if (!app::Handle(e)) break;
+#else
         if (SDL_WaitEventTimeout(&e, 100) && !app::Handle(e)) break;
+#endif
     }
     logx::Flush();
     kernel::Shutdown(0);

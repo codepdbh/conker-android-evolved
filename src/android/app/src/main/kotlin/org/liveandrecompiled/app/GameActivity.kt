@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
+import android.system.Os
 import android.os.Vibrator
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -21,6 +22,7 @@ class GameActivity : SDLActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // left behind by a run that dies: the launcher reads it to offer the report (a run that ends well removes it)
         sentinel.writeText(System.currentTimeMillis().toString())
+        applyDebugEnvironment()
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -46,6 +48,15 @@ class GameActivity : SDLActivity() {
         if (hasFocus) hideBars()
     }
 
+    // the runtime's XBE_ switches for a phone, where nothing can set them: one NAME=value a line in files/debug_env.txt
+    private fun applyDebugEnvironment() {
+        val file = File(filesDir, DEBUG_ENV)
+        if (!file.exists()) return
+        file.readLines().map { it.trim() }.filter { it.startsWith("XBE_") && '=' in it }.forEach {
+            Os.setenv(it.substringBefore('='), it.substringAfter('='), true)
+        }
+    }
+
     // the status and navigation bars away until swiped in
     private fun hideBars() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -58,5 +69,6 @@ class GameActivity : SDLActivity() {
 
     companion object {
         const val RUNNING = ".game-running"
+        const val DEBUG_ENV = "debug_env.txt"
     }
 }

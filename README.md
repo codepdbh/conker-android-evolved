@@ -1,15 +1,16 @@
 # Conker: Live & Reloaded — Android Evolved
 
-Port experimental a Android ARM64 por recompilación estática, sin emulador. **Todavía no es jugable: el juego no se ha ejecutado
-nunca en este port.** Solo se ha probado el launcher, en un Redmi Note 8. El estado de cada parte está en
-[docs/PROGRESS.md](docs/PROGRESS.md).
+Port experimental a Android ARM64 por recompilación estática, sin emulador. **Todavía no es jugable:** el juego arranca en un
+Redmi Note 8 y dibuja sus escenas y menús, pero empezar una partida se cuelga en la pantalla de carga. El estado de cada parte está
+en [docs/PROGRESS.md](docs/PROGRESS.md).
 
 | Parte | Estado |
 |---|---|
-| `libmain.so` para ARM64 | Compila y enlaza; sin ejecutar |
-| Launcher: compatibilidad e informe de logs | Probado en un Redmi Note 8 |
+| `libmain.so` para ARM64 | Arranca en un Redmi Note 8 |
+| Launcher: compatibilidad, instalar la copia e informe de logs | Probado en un Redmi Note 8 |
+| HUD táctil en el juego | Botones y cruceta probados |
 | Editor del HUD | Abre; arrastrar, guardar y multitáctil sin probar |
-| Renderer con alternativas para Vulkan 1.1 | Compilado; sin ejecutar |
+| Renderer con alternativas para Vulkan 1.1 | Dibuja en Adreno 610; sin revisar en partida |
 | Mali y Xclipse (Helio, Dimensity, Exynos) | Sin probar, no hay dispositivos |
 
 El repositorio no incluye el juego, sus recursos ni código generado desde su ejecutable. Hace falta una copia propia:

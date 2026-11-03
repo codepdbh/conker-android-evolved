@@ -7,9 +7,9 @@ Léelo primero al retomar el trabajo. Cada línea dice si algo está **probado**
 | Nivel | Estado |
 |---|---|
 | A. Estructura preparada | Hecho, salvo abrirlo en Android Studio (sin comprobar) |
-| B. Host Android funcional | En curso: la APK compila; falta probarla en el teléfono |
-| C. Recompilación integrada | Compilado con una copia no verificada: el XBE genera C++, compila a ARM64 y enlaza |
-| D. Primer arranque jugable | **Sin probar**: el juego no se ha ejecutado nunca en este port |
+| B. Host Android funcional | Probado en un Redmi Note 8 |
+| C. Recompilación integrada | Probado con una copia no verificada: el juego corre en ARM64 |
+| D. Primer arranque jugable | En curso: arranca, dibuja y responde a los controles; falta jugar una partida |
 | E. Port estable | Sin empezar |
 
 ## Registro
@@ -46,11 +46,28 @@ Publicado:
 
 - Código fuente en GitHub, a petición del usuario. `assets/`, `generated/` y `out/` quedan fuera.
 
-Bloqueado:
+Primer arranque en el Redmi Note 8, con la copia `unverified-variant` y Play Protect desactivado por el usuario:
 
-- Instalar la APK con `libmain.so`. Play Protect muestra un diálogo en cada instalación y el teléfono tiene
-  `upload_apk_enable=1`. Esa APK contiene código derivado del juego: no instalarla hasta que el usuario decida. No se cambian sus
-  ajustes de seguridad desde adb.
+- La ISO se valida e instala desde el launcher (4,3 GB). `libmain.so` carga sin instrucción ilegal.
+- Vulkan 1.1 funciona con las alternativas: render passes, fences, más pipelines, DXT decodificado al subir. Las escenas 3D, una
+  demo de gameplay con su interfaz y una cinemática se ven en pantalla.
+- El HUD táctil responde: Start, A, B y cruceta. Se creó un perfil de prueba en el menú.
+- Sesiones de varios minutos sin cierres. AAudio se abre y queda activo; **nadie ha comprobado aún que se oiga bien**.
+
+Fallos abiertos:
+
+1. Empezar una partida cuelga en "Loading...": un hilo queda en `sub_001F04F0`, la pantalla de datos ausentes del juego, que es un
+   bucle infinito. Causa sin encontrar. El juego ahora registra quién la llamó (`missing-data screen` en el log), pero el cuelgue
+   no se ha vuelto a reproducir con ese registro. **No se ha jugado ninguna partida controlando al personaje.**
+2. Los gráficos siguen por revisar con el juego en marcha: el usuario los vio mal antes de la corrección de barreras. Render al 50 %.
+3. El menú se vio legible con la corrección de barreras y el cambio en `Busy()` que luego se revirtió. La versión sin ese cambio
+   compila e instala, pero su menú **no se ha visto**.
+4. Sin comparar con PC: no se sabe qué fallos gráficos son propios de Android.
+5. `ReuseRun` no comprueba la topología sin extended dynamic state. Solo afecta a la generación de fotogramas, que está desactivada.
+
+Diagnóstico en el teléfono: `files/debug_env.txt` admite una línea `XBE_...=valor` por variable (`XBE_VERBOSE=1`,
+`XBE_CAPTURE_DIR=captures`). Con esta última, F3 (`adb shell input keyevent KEYCODE_F3`) guarda un fotograma en el almacenamiento de
+la app. La captura fuerza el fin de cada pasada: por eso mostró el menú bien y señaló las barreras.
 
 ## Errores encontrados y su solución
 
@@ -59,9 +76,12 @@ Bloqueado:
 | `ld.lld: cannot open .../28\crtbegin_dynamic.o` al configurar en Windows | `file(WRITE)` de CMake escribe CRLF en Windows y Zig toma el CR como parte de la ruta | `file(CONFIGURE ... NEWLINE_STYLE UNIX)` en `cmake/zig-android.cmake` |
 | `ld.lld: cmake_pch.h.o: unknown file type` | `zig cc` pasa el encabezado precompilado de SDL al enlazador | `CMAKE_DISABLE_PRECOMPILE_HEADERS` en `cmake/zig-android.cmake` |
 | Un `adb install` que no termina | Diálogo de Play Protect en el teléfono | Responder en el teléfono; no se puede resolver desde el PC sin desactivar la protección |
+| `.ps1` que no se analiza: `La referencia de variable no es válida` | `"$var: texto"` en PowerShell se lee como unidad de disco | `"${var}: texto"` |
+| Texto del menú ausente o con colores falsos en Adreno 610 | La GPU leía el atlas de letras antes de terminar de escribirlo: barreras solo con los bits generales de memoria y render passes sin dependencias | Barreras con cada tipo de acceso por su nombre y dependencias de subpass (`kAllWrites`, `RenderPassFor`) |
+| Un núcleo entero ocupado en el hilo principal | `SDL_WaitEventTimeout` gira en Android | `SDL_PollEvent` con espera de 4 ms |
 
 ## Siguiente paso
 
-1. Instalar la APK completa e instalar el juego desde el launcher.
-2. Lanzar el juego y leer sus logs con `scripts/collect_logs.ps1`.
-3. Corregir lo que falle, en orden de arranque: carga de `libmain.so`, memoria, Vulkan, shaders, primer fotograma.
+1. Reproducir el cuelgue con el registro nuevo y corregirlo.
+2. Revisar los gráficos en partida y medir FPS.
+3. Comprobar audio, salir y volver, guardar y cargar.

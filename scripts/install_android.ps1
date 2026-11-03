@@ -3,7 +3,7 @@
 param([switch]$Clean, [string]$Device)
 . "$PSScriptRoot\env.ps1"
 $target = if ($Device) { @('-s', $Device) } else { @() }
-if (-not (Test-Path $ApkDebug)) { throw "no APK at $ApkDebug: run scripts\build_android.ps1" }
+if (-not (Test-Path $ApkDebug)) { throw "no APK at ${ApkDebug}: run scripts\build_android.ps1" }
 if ($Clean) { & $Adb @target uninstall $AppId }
 & $Adb @target install -r -t $ApkDebug
 if ($LASTEXITCODE) { throw 'adb install failed. A phone may ask to allow installing over USB' }

@@ -4,7 +4,7 @@ param([switch]$AcceptVariant)
 . "$PSScriptRoot\env.ps1"
 Set-Location $Root
 $xbe = 'assets\default.xbe'
-if (-not (Test-Path $xbe)) { throw "no $xbe: python scripts\extract_game.py <your.iso> --out assets --only default.xbe" }
+if (-not (Test-Path $xbe)) { throw "no ${xbe}: python scripts\extract_game.py <your.iso> --out assets --only default.xbe" }
 python scripts\validate_game.py $xbe
 $verdict = $LASTEXITCODE
 if ($verdict -eq 2) { throw 'the XBE is unusable' }

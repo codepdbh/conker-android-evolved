@@ -2341,12 +2341,22 @@ VulkanBackend::Alloc VulkanBackend::Upload(uint64_t size, uint64_t align) {
     return {b->buf, 0, b->map};
 }
 
+// every kind by name as well as the general bit: the spec counts the general bit as all of them, old mobile drivers flush
+// by the named ones
+constexpr VkAccessFlags kAllWrites = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT |
+                                     VK_ACCESS_SHADER_WRITE_BIT;
+constexpr VkAccessFlags kAllReads = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT |
+                                    VK_ACCESS_INPUT_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                                    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT |
+                                    VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_INDEX_READ_BIT;
+
 void VulkanBackend::Transition(Image& im, VkImageLayout want) {
     if (im.layout == want) return;
     EndRendering();
     VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-    b.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-    b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    b.srcAccessMask = kAllWrites;
+    b.dstAccessMask = kAllReads | kAllWrites;
     b.oldLayout = im.layout;
     b.newLayout = want;
     b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -2361,8 +2371,8 @@ void VulkanBackend::Transition(Image& im, VkImageLayout want) {
 void VulkanBackend::Barrier() {
     EndRendering();
     VkMemoryBarrier m{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-    m.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-    m.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    m.srcAccessMask = kAllWrites;
+    m.dstAccessMask = kAllReads | kAllWrites;
     vkCmdPipelineBarrier(cmd_, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &m, 0,
                          nullptr, 0, nullptr);
 }
@@ -2470,11 +2480,25 @@ VkRenderPass VulkanBackend::RenderPassFor(VkFormat color, VkFormat depth, uint32
     sub.colorAttachmentCount = color ? 1 : 0;
     sub.pColorAttachments = &cr;
     sub.pDepthStencilAttachment = depth ? &zr : nullptr;
+    // what a target drew is there for whoever reads it next, and what came before is done: a tiled GPU otherwise starts
+    // sampling a target its pass has not written out (the frontend's glyph atlas, read half made)
+    VkSubpassDependency deps[2] = {};
+    deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    deps[0].dstSubpass = 0;
+    deps[1].srcSubpass = 0;
+    deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    for (VkSubpassDependency& d : deps) {
+        d.srcStageMask = d.dstStageMask = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        d.srcAccessMask = kAllWrites;
+        d.dstAccessMask = kAllReads | kAllWrites;
+    }
     VkRenderPassCreateInfo ci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
     ci.attachmentCount = n;
     ci.pAttachments = at;
     ci.subpassCount = 1;
     ci.pSubpasses = &sub;
+    ci.dependencyCount = 2;
+    ci.pDependencies = deps;
     VkRenderPass pass = VK_NULL_HANDLE;
     if (vkCreateRenderPass(dev_, &ci, nullptr, &pass) != VK_SUCCESS) LOGE("vulkan: no render pass");
     render_passes_[key] = pass;

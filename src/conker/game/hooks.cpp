@@ -14,6 +14,7 @@
 #include "xdk/hle.h"
 #include "cpu/x86_ops.h"
 #include "core/diag.h"
+#include "core/log.h"
 #include "xdk/d3d8.h"
 #include "xdk/dsound.h"
 
@@ -31,6 +32,25 @@ constexpr uint32_t kDevBackBuffer = 0x1A14;  // CDevice_BackBuffer
 constexpr uint32_t kDevAutoDepth = 0x1A20;   // CDevice_AutoDepth
 
 }  // namespace
+
+// 0x1F04F0: the missing-data screen, which ends in a jump to itself: the game looks hung on its loading screen. It says
+// who sent it there and which names were at hand, or a report from a phone says nothing
+X86_EXTERN_FUNC(__imp__sub_001F04F0);
+X86_FUNC(sub_001F04F0) {
+    LOGE("missing-data screen, from %08X", X86_MEM32(ctx.esp));
+    for (uint32_t i = 1; i < 256; i++) {
+        uint32_t v = X86_MEM32(ctx.esp + i * 4);
+        if (v >= 0x11000 && v < 0x540000) {
+            LOGE("  [esp+%03X] %08X", i * 4, v);
+        } else if (v >= 0x540000 && v < 0x4000000) {
+            const char* s = reinterpret_cast<const char*>(base + v);
+            size_t n = 0;
+            while (n < 80 && s[n] >= 32 && s[n] < 127) n++;
+            if (n >= 4 && !s[n]) LOGE("  [esp+%03X] \"%s\"", i * 4, s);
+        }
+    }
+    __imp__sub_001F04F0(ctx, base);
+}
 
 // 0x4E2801: the XMV movie decoder's per-frame update. The transition manager treats a negative return as a
 // failed movie: its open loop (0x252470) leaves and its playing state (0x2529xx) closes and releases the
