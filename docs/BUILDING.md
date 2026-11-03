@@ -14,6 +14,8 @@ scripts\build_android.ps1 -LauncherOnly
 scripts\install_android.ps1
 ```
 
+Esta es la única APK que se puede publicar: no lleva código del juego. Compruébala siempre antes de subirla.
+
 ## Con el juego
 
 ```powershell

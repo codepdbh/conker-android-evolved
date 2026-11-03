@@ -6,7 +6,8 @@ param([switch]$LauncherOnly, [switch]$AcceptVariant, [int]$Jobs = 0)
 . "$PSScriptRoot\env.ps1"
 Set-Location $Root
 if (-not $Jobs) { $Jobs = [Math]::Max(1, [Environment]::ProcessorCount - 1) }
-$gradleArgs = @('--no-daemon', '-q', 'assembleDebug')
+# a launcher to hand out starts clean: Gradle's incremental packaging leaves the room of a removed libmain.so in the APK
+$gradleArgs = if ($LauncherOnly) { @('--no-daemon', '-q', ':app:clean', 'assembleDebug') } else { @('--no-daemon', '-q', 'assembleDebug') }
 if (-not $LauncherOnly) {
     & "$PSScriptRoot\recompile_xbe.ps1" -AcceptVariant:$AcceptVariant
     cmake -DWHAT=zig-android -P tools\configure.cmake
