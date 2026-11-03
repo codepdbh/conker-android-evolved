@@ -93,7 +93,7 @@ void AddPad(SDL_JoystickID id) {
     for (int p = 0; p < kPorts; p++) {
         if (HasLocked(p, Kind::Controller)) continue;
         Slot(p, Kind::Controller) = d.key;
-        LOGI("input: controller %s goes to player %d", d.key.c_str(), p + 1);
+        LOGR("input: controller %s goes to player %d", d.key.c_str(), p + 1);
         return;
     }
 }

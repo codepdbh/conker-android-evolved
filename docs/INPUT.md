@@ -5,7 +5,7 @@
 ## Controles
 
 Dos sticks que aparecen donde cae el pulgar (el izquierdo en la zona inferior izquierda, el derecho en el resto), A, B, X, Y,
-White, Black, LT, RT, D-Pad, Back, Start y un botón de menú. Varios dedos a la vez, hasta 10.
+White, Black, LT, RT, D-Pad, Back, Start y un botón de menú que no se dibuja durante el juego: se ve 8 s al arrancar y 4 s al tocar su zona, arriba al centro. El botón atrás de Android también abre el menú. Varios dedos a la vez, hasta 10.
 
 ## Editor
 

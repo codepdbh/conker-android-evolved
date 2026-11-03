@@ -1,5 +1,9 @@
 Third party software in the executables built with this SDK
 
+libadrenotools, commit 8fae8ce (https://github.com/bylaws/libadrenotools) and liblinkernsbypass, commit aa39758
+(https://github.com/bylaws/liblinkernsbypass), to load a Vulkan driver the player imports. BSD 2-Clause, Copyright (c) 2021,
+Billy Laws: the full text is in the LICENSE file in third_party/libadrenotools and in its lib/linkernsbypass.
+
 Xbox XBE Recomp (https://github.com/TGP482/XboxXBERecomp), the recompiler and runtime this is built on
 
 MIT License

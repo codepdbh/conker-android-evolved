@@ -125,6 +125,7 @@ std::vector<Mode> DisplayModes();
 // its size in pixels, and ImGui's platform frame; any thread
 std::vector<const char*> VulkanExtensions();
 bool VulkanSurface(void* instance, void* surface);
+void* AndroidWindow();  // the window's ANativeWindow
 void PixelSize(uint32_t& w, uint32_t& h);
 void UiNewFrame();
 // Android: the app is in the background and its window has no surface. The renderer lets go of its own and says so

@@ -253,6 +253,7 @@ class TouchEditorActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Lang.load(this)
         file = LayoutFile(this).apply { load() }
         view = EditorView(this, file) { describe() }
         val root = FrameLayout(this)
@@ -282,23 +283,23 @@ class TouchEditorActivity : Activity() {
         }
         small("−") { view.resize(0.9f) }
         small("+") { view.resize(1.1f) }
-        val test = small("Probar") {}
+        val test = small(Lang.t("Probar", "Test", "Testar")) {}
         test.setOnClickListener {
             view.testing = !view.testing
-            test.text = if (view.testing) "Editar" else "Probar"
+            test.text = if (view.testing) Lang.t("Editar", "Edit", "Editar") else Lang.t("Probar", "Test", "Testar")
             describe()
         }
-        small("Restablecer") {
+        small(Lang.t("Restablecer", "Reset", "Redefinir")) {
             file.reset()
             view.invalidate()
             sync()
         }
-        small("Guardar") {
+        small(Lang.t("Guardar", "Save", "Salvar")) {
             file.save()
             finish()
         }
         options.addView(TextView(this).apply {
-            text = "Opacidad"
+            text = Lang.t("Opacidad", "Opacity", "Opacidade")
             setTextColor(Color.WHITE)
             textSize = 12f
         })
@@ -317,7 +318,7 @@ class TouchEditorActivity : Activity() {
         }
         options.addView(opacity)
         hide = CheckBox(this).apply {
-            text = "Ocultar con mando"
+            text = Lang.t("Ocultar con mando", "Hide with a controller", "Ocultar com controle")
             setTextColor(Color.WHITE)
             textSize = 12f
             isChecked = file.hideWithPad
@@ -325,7 +326,7 @@ class TouchEditorActivity : Activity() {
         }
         options.addView(hide)
         buzz = CheckBox(this).apply {
-            text = "Vibración"
+            text = Lang.t("Vibración", "Vibration", "Vibração")
             setTextColor(Color.WHITE)
             textSize = 12f
             isChecked = file.vibrate
@@ -369,10 +370,10 @@ class TouchEditorActivity : Activity() {
 
     private fun describe() {
         status.text = when {
-            view.testing && view.heldCount() > 0 -> "${view.heldCount()} a la vez: ${view.held()}"
-            view.testing -> "Pulsa varios controles a la vez para probarlos"
-            view.selected != null -> "Arrastra para mover · pellizca o usa − y + para cambiar el tamaño"
-            else -> "Toca un control para seleccionarlo"
+            view.testing && view.heldCount() > 0 -> Lang.t("${view.heldCount()} a la vez: ${view.held()}", "${view.heldCount()} at once: ${view.held()}", "${view.heldCount()} ao mesmo tempo: ${view.held()}")
+            view.testing -> Lang.t("Pulsa varios controles a la vez para probarlos", "Press several controls at once to test them", "Toque vários controles ao mesmo tempo para testar")
+            view.selected != null -> Lang.t("Arrastra para mover · pellizca o usa − y + para cambiar el tamaño", "Drag to move · pinch or use − and + to resize", "Arraste para mover · faça pinça ou use − e + para redimensionar")
+            else -> Lang.t("Toca un control para seleccionarlo", "Tap a control to select it", "Toque em um controle para selecioná-lo")
         }
     }
 

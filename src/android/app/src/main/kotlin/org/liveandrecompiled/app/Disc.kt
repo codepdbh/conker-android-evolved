@@ -28,7 +28,7 @@ class Disc(private val channel: FileChannel) {
     }
 
     private val base: Long = OFFSETS.firstOrNull { off -> magicAt(off + 0x10000) }
-        ?: throw DiscError("Este archivo no es una imagen de disco de Xbox.")
+        ?: throw DiscError(Lang.t("Este archivo no es una imagen de disco de Xbox.", "This file isn't an Xbox disc image.", "Este arquivo não é uma imagem de disco de Xbox."))
     val root: Entry
 
     init {
@@ -49,7 +49,7 @@ class Disc(private val channel: FileChannel) {
         var pos = at
         while (b.hasRemaining()) {
             val got = channel.read(b, pos)
-            if (got <= 0) throw DiscError("La imagen de disco está incompleta.")
+            if (got <= 0) throw DiscError(Lang.t("La imagen de disco está incompleta.", "The disc image is incomplete.", "A imagem de disco está incompleta."))
             pos += got
         }
         b.flip()
@@ -58,7 +58,7 @@ class Disc(private val channel: FileChannel) {
 
     private fun load(dir: Entry, seen: MutableSet<Long>) {
         if (dir.size == 0L) return
-        if (dir.size > MAX_TABLE || !seen.add(dir.sector)) throw DiscError("La imagen de disco está dañada.")
+        if (dir.size > MAX_TABLE || !seen.add(dir.sector)) throw DiscError(Lang.t("La imagen de disco está dañada.", "The disc image is damaged.", "A imagem de disco está danificada."))
         val table = bytes(base + dir.sector * SECTOR, dir.size.toInt())
         walk(table, 0, dir, seen, HashSet())
         dir.children.sortBy { it.name.lowercase() }
@@ -74,13 +74,13 @@ class Disc(private val channel: FileChannel) {
         val size = t.getInt(off + 8).toLong() and 0xFFFFFFFFL
         val attrs = t.get(off + 12).toInt()
         val nameLen = t.get(off + 13).toInt() and 0xFF
-        if (off + 14 + nameLen > t.limit()) throw DiscError("La imagen de disco está dañada.")
+        if (off + 14 + nameLen > t.limit()) throw DiscError(Lang.t("La imagen de disco está dañada.", "The disc image is damaged.", "A imagem de disco está danificada."))
         val raw = ByteArray(nameLen)
         for (i in 0 until nameLen) raw[i] = t.get(off + 14 + i)
         val name = String(raw, Charsets.ISO_8859_1)
         // a name from the file goes into a path below: nothing that leaves the folder
         if (name.isEmpty() || name == "." || name == ".." || '/' in name || '\\' in name) {
-            throw DiscError("La imagen de disco tiene un nombre de archivo no válido.")
+            throw DiscError(Lang.t("La imagen de disco tiene un nombre de archivo no válido.", "The disc image has an invalid file name.", "A imagem de disco tem um nome de arquivo inválido."))
         }
         val entry = Entry(name, sector, size, attrs and 0x10 != 0)
         if (left != 0) walk(t, left, dir, seen, visited)
@@ -102,7 +102,7 @@ class Disc(private val channel: FileChannel) {
             b.clear()
             b.limit(minOf(chunk.toLong(), left).toInt())
             val got = channel.read(b, pos)
-            if (got <= 0) throw DiscError("La imagen de disco termina dentro de ${entry.name}.")
+            if (got <= 0) throw DiscError(Lang.t("La imagen de disco termina dentro de ${entry.name}.", "The disc image ends inside ${entry.name}.", "A imagem de disco termina dentro de ${entry.name}."))
             b.flip()
             sink(b)
             pos += got

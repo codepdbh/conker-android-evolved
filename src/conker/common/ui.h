@@ -19,5 +19,6 @@ bool Open();
 // settings.toml options (app::Option): the fps overlay and the fps in the window title
 extern bool g_fps_overlay;
 extern bool g_fps_title;
+extern uint32_t g_menu_language;  // on a phone: 0 Spanish, 1 English, 2 Portuguese
 
 }  // namespace ui

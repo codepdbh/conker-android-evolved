@@ -118,7 +118,7 @@ object Report {
         }
     }
 
-    private fun readTail(f: File, max: Long): ByteArray = java.io.RandomAccessFile(f, "r").use { r ->
+    fun readTail(f: File, max: Long): ByteArray = java.io.RandomAccessFile(f, "r").use { r ->
         val n = minOf(r.length(), max)
         r.seek(r.length() - n)
         ByteArray(n.toInt()).also { r.readFully(it) }

@@ -60,6 +60,9 @@ struct Finger {
 std::mutex g_lock;
 Finger g_fingers[10];
 float g_w = 0, g_h = 0;  // the window, in points, as of the last finger
+// the menu's button stays out of the game's picture: there for a while from the start, or from a touch where it sits
+constexpr uint64_t kMenuAtStartMs = 8000, kMenuShownMs = 4000, kMenuFadeMs = 500;
+uint64_t g_menu_until = 0;
 bool g_shown = false;
 
 // the file's name for each control, the editor's too
@@ -196,6 +199,7 @@ void Init() {
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "1");
     std::lock_guard lock(g_lock);
     LoadOptions();
+    g_menu_until = SDL_GetTicks() + kMenuAtStartMs;
 }
 
 bool Handle(const void* sdl_event) {
@@ -224,10 +228,23 @@ bool Handle(const void* sdl_event) {
         Finger* f = std::find_if(std::begin(g_fingers), std::end(g_fingers), [](const Finger& f) { return f.control == -1; });
         if (f == std::end(g_fingers)) return false;
         *f = {e.tfinger.fingerID, StickAt(x, y, g_w, g_h), x, y, x, y};
+        const uint64_t now = SDL_GetTicks();
+        bool reveal = false;
         for (const Button& b : Layout(g_w, g_h)) {
             // a little past the drawn circle: thumbs land wide
             float r = b.r * 1.25f;
-            if ((x - b.x) * (x - b.x) + (y - b.y) * (y - b.y) <= r * r) f->control = b.control;
+            float d2 = (x - b.x) * (x - b.x) + (y - b.y) * (y - b.y);
+            if (b.control == kMenu && now >= g_menu_until) {
+                reveal = d2 <= 4 * r * r;
+                continue;
+            }
+            if (d2 <= r * r) f->control = b.control;
+        }
+        // on a hidden button's place, a touch only brings it back: it presses nothing and moves no camera
+        if (reveal && (f->control == kLeftStick || f->control == kRightStick)) {
+            f->control = -1;
+            g_menu_until = now + kMenuShownMs;
+            return false;
         }
         if (f->control < kLeftStick) Buzz();
         return f->control == kMenu;
@@ -272,16 +289,27 @@ void Draw() {
     auto held = [&](int control) {
         return std::any_of(std::begin(g_fingers), std::end(g_fingers), [&](const Finger& f) { return f.control == control; });
     };
+    const uint64_t now = SDL_GetTicks();
     for (const Button& b : Layout(size.x, size.y)) {
         ImVec2 c(b.x, b.y);
-        dl->AddCircleFilled(c, b.r, Faded(held(b.control) ? kPressed : kFill));
-        dl->AddCircle(c, b.r, Faded(kLine), 0, 2);
         if (b.control == kMenu) {
+            if (now >= g_menu_until) continue;
+            // gone gradually over its last moments
+            const float fade = std::min(float(g_menu_until - now) / float(kMenuFadeMs), 1.0f);
+            auto faded = [&](ImU32 col) {
+                ImU32 v = Faded(col);
+                uint32_t a = uint32_t(float(v >> IM_COL32_A_SHIFT & 0xFF) * fade);
+                return (v & ~IM_COL32_A_MASK) | a << IM_COL32_A_SHIFT;
+            };
+            dl->AddCircleFilled(c, b.r, faded(held(b.control) ? kPressed : kFill));
+            dl->AddCircle(c, b.r, faded(kLine), 0, 2);
             for (int i = -1; i <= 1; i++)
                 dl->AddLine(ImVec2(c.x - b.r * 0.45f, c.y + i * b.r * 0.32f), ImVec2(c.x + b.r * 0.45f, c.y + i * b.r * 0.32f),
-                            Faded(kText), 2);
+                            faded(kText), 2);
             continue;
         }
+        dl->AddCircleFilled(c, b.r, Faded(held(b.control) ? kPressed : kFill));
+        dl->AddCircle(c, b.r, Faded(kLine), 0, 2);
         if (!*b.label) continue;
         float fs = b.r * (std::strlen(b.label) > 2 ? 0.55f : 0.8f);
         ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, b.label);

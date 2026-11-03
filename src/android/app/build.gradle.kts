@@ -50,9 +50,9 @@ android {
         }
     }
 
-    // libmain.so stays stored and page aligned in the APK, mapped from there rather than unpacked at install
+    // unpacked at install: libadrenotools opens its hook libraries by path, from the native library folder
     packaging {
-        jniLibs.useLegacyPackaging = false
+        jniLibs.useLegacyPackaging = true
     }
 
     compileOptions {

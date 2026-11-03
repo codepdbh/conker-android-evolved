@@ -23,6 +23,7 @@ class GameActivity : SDLActivity() {
         // left behind by a run that dies: the launcher reads it to offer the report (a run that ends well removes it)
         sentinel.writeText(System.currentTimeMillis().toString())
         applyDebugEnvironment()
+        Drivers.environment(this).forEach { (name, value) -> Os.setenv(name, value, true) }
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

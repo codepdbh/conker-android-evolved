@@ -19,6 +19,11 @@
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
+#ifdef __ANDROID__
+#include <android/native_window.h>
+#include <dlfcn.h>
+#include <vulkan/vulkan_android.h>
+#endif
 
 #include <SPIRV/GlslangToSpv.h>
 #include <glslang/Public/ResourceLimits.h>
@@ -112,6 +117,48 @@ bool SameBytes(const T& a, const T& b) {
     }
     return i == sizeof(T) || std::memcmp(x + i, y + i, sizeof(T) - i) == 0;
 }
+
+#ifdef __ANDROID__
+// A driver the player imported (the launcher's Drivers.kt says which, in the environment): opened through libgpudriver.so,
+// with its own entry point in place of the system loader's. One that won't open leaves the phone's own
+bool g_imported_driver = false;
+
+bool LoadVulkan() {
+    const char* hooks = std::getenv("XBE_GPU_HOOKS");
+    const char* temp = std::getenv("XBE_GPU_TEMP");
+    const char* dir = std::getenv("XBE_GPU_DRIVER_DIR");
+    const char* lib = std::getenv("XBE_GPU_DRIVER_LIB");
+    if (hooks && dir && lib) {
+        using Open = void* (*)(const char*, const char*, const char*, const char*);
+        void* helper = dlopen("libgpudriver.so", RTLD_NOW);
+        auto open = helper ? reinterpret_cast<Open>(dlsym(helper, "conker_open_vulkan")) : nullptr;
+        void* driver = open ? open(hooks, temp, dir, lib) : nullptr;
+        auto entry = driver ? reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(driver, "vkGetInstanceProcAddr")) : nullptr;
+        if (entry) {
+            volkInitializeCustom(entry);
+            g_imported_driver = true;
+            LOGR("Vulkan: imported driver %s%s", dir, lib);
+            return true;
+        }
+        LOGE("vulkan: the imported driver %s%s did not open, the phone's instead", dir, lib);
+    }
+    return volkInitialize() == VK_SUCCESS;
+}
+
+// SDL makes a surface through the system loader's entry point, which an imported driver's instance is not for
+bool MakeSurface(VkInstance instance, VkSurfaceKHR* surface) {
+    if (!g_imported_driver) return app::VulkanSurface(instance, surface);
+    auto create = reinterpret_cast<PFN_vkCreateAndroidSurfaceKHR>(vkGetInstanceProcAddr(instance, "vkCreateAndroidSurfaceKHR"));
+    auto* window = static_cast<ANativeWindow*>(app::AndroidWindow());
+    if (!create || !window) return false;
+    VkAndroidSurfaceCreateInfoKHR ci{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
+    ci.window = window;
+    return create(instance, &ci, nullptr, surface) == VK_SUCCESS;
+}
+#else
+bool LoadVulkan() { return volkInitialize() == VK_SUCCESS; }
+bool MakeSurface(VkInstance instance, VkSurfaceKHR* surface) { return app::VulkanSurface(instance, surface); }
+#endif
 
 constexpr int kFrames = 3;
 constexpr uint32_t kMaxGen = 4;  // app::Settings::frame_generation's most: pictures per frame
@@ -1568,7 +1615,7 @@ VulkanBackend::~VulkanBackend() {
 
 // XBE_VULKAN_DEBUG: the validation layer, its messages in the log
 bool VulkanBackend::CreateInstance() {
-    if (volkInitialize() != VK_SUCCESS) {
+    if (!LoadVulkan()) {
         LOGE("vulkan: no Vulkan loader");
         return false;
     }
@@ -1633,7 +1680,7 @@ bool VulkanBackend::CreateSurface() {
     }
     return true;
 #else
-    if (!app::VulkanSurface(inst_, &surface_)) {
+    if (!MakeSurface(inst_, &surface_)) {
         LOGE("vulkan: no surface for the window");
         return false;
     }
@@ -4185,11 +4232,8 @@ bool VulkanBackend::ReuseRun(const State& s) {
     if (CurrentFrame().used > kUploadSize - kUploadReserve) return false;
     if (bound_rt_ != kept_.rt || bound_ds_ != kept_.ds || bound_ms_ != kept_.ms || (!bound_rt_ && !bound_ds_))
         return false;
-    if (!have_eds_) {
-        if (r.buffers != kept_.buffer_count) return false;
-        for (uint32_t i = 0; i < r.buffers; i++)
-            if (r.strides[i] != kept_.strides[i]) return false;
-    }
+    // without extended dynamic state the pipeline holds a topology and strides, which a run may not share
+    if (!have_eds_) return false;
     FlushRun();
     EnsureRendering();
     if (kept_.pso != drawn_.pso) {
@@ -5061,7 +5105,7 @@ void VulkanBackend::ResizeSwap() {
     }
     if (!surface_) {
         VkBool32 present = VK_FALSE;
-        if (!app::VulkanSurface(inst_, &surface_) ||
+        if (!MakeSurface(inst_, &surface_) ||
             (vkGetPhysicalDeviceSurfaceSupportKHR(phys_, qfam_, surface_, &present), !present)) {
             if (surface_) vkDestroySurfaceKHR(inst_, surface_, nullptr);
             surface_ = VK_NULL_HANDLE;

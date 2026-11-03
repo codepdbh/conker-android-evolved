@@ -54,6 +54,31 @@ Primer arranque en el Redmi Note 8, con la copia `unverified-variant` y Play Pro
 - El HUD táctil responde: Start, A, B y cruceta. Se creó un perfil de prueba en el menú.
 - Sesiones de varios minutos sin cierres. AAudio se abre y queda activo; **nadie ha comprobado aún que se oiga bien**.
 
+Launcher nuevo, con el icono del usuario (`scripts/make_icon.py`): visto en vertical en un Samsung S25 Ultra (SM-S938B, Adreno 830,
+Vulkan 1.3.284). Sin ver: las dos columnas en horizontal y el icono en el cajón de apps. En ese teléfono no se ha instalado el juego.
+
+En el Samsung S25 Ultra, con el juego instalado: la ruta Vulkan 1.3 arranca y el log llegó a `warp: in level 41 TrainingLevel`.
+
+Menú táctil nuevo en Android (`DrawTouchMenu`, `ui.cpp`): se abre con atrás, se ve, cambia de sección y se desplaza arrastrando.
+
+Probado en el Samsung: FPS y calidad se guardan desde el launcher, y su idioma cambia (español, inglés, portugués).
+
+Medido en el Samsung:
+
+- 60 FPS estables, con 8-10 ms por fotograma en el hilo de render, a resolución 100 %.
+- 120 FPS con fotogramas generados: bajó a 37 FPS. Por eso el launcher y el menú ofrecen solo 30 y 60.
+- `game_language = 5` (español) lleva a la pantalla de datos ausentes a los 0,4 s del arranque. Esta copia no admite ese idioma, y la
+  opción se retiró del juego. Solo se probó el español. Puede tener relación con el cuelgue (fallo abierto 1) y con los 490 archivos de
+  esta copia frente a los 881 que cita upstream: **sin comprobar**.
+
+Solo compilado, sin ejecutar: importar y usar un driver (`Drivers.kt`, `gpudriver.cpp`, `LoadVulkan`), reportar en GitHub (`Issue.kt`), el
+botón de menú oculto (`touch.cpp`), los mandos físicos (sin mando a mano) y su atajo Guide o Start+Back, el efecto de los ajustes de calidad y
+del ritmo sin espera activa (`Pace`, `TellScreenRate`). Las bibliotecas nativas se desempaquetan ahora al instalar, porque libadrenotools
+abre sus hooks por ruta; `tools/package-android.cmake` y `src/apkbuilder/` no incluyen estas bibliotecas.
+
+Red: Xbox Live no existe en el runtime (`xnet.cpp`). System Link sí, sin probar; en el Redmi `bind` al puerto 1001 falló con 10013, que
+parece el límite de Android para puertos menores de 1024.
+
 Fallos abiertos:
 
 1. Empezar una partida cuelga en "Loading...": un hilo queda en `sub_001F04F0`, la pantalla de datos ausentes del juego, que es un
@@ -63,7 +88,6 @@ Fallos abiertos:
 3. El menú se vio legible con la corrección de barreras y el cambio en `Busy()` que luego se revirtió. La versión sin ese cambio
    compila e instala, pero su menú **no se ha visto**.
 4. Sin comparar con PC: no se sabe qué fallos gráficos son propios de Android.
-5. `ReuseRun` no comprueba la topología sin extended dynamic state. Solo afecta a la generación de fotogramas, que está desactivada.
 
 Diagnóstico en el teléfono: `files/debug_env.txt` admite una línea `XBE_...=valor` por variable (`XBE_VERBOSE=1`,
 `XBE_CAPTURE_DIR=captures`). Con esta última, F3 (`adb shell input keyevent KEYCODE_F3`) guarda un fotograma en el almacenamiento de

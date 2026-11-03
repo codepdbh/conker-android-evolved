@@ -8,6 +8,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #ifdef __ANDROID__
+#include <dlfcn.h>
+#endif
+#ifdef __ANDROID__
 #include <SDL3/SDL_main.h>
 #endif
 #include <unistd.h>
@@ -299,6 +302,16 @@ bool Handle(const SDL_Event& e) {
         case SDL_EVENT_GAMEPAD_REMOVED:
             input::HandleEvent(&e);
             break;
+#ifdef __ANDROID__
+        // with a controller the on-screen controls go, and their menu button with them: Guide, which phones often keep to
+        // themselves, or Start and Back together
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
+            SDL_Gamepad* pad = SDL_GetGamepadFromID(e.gbutton.which);
+            const bool chord = pad && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START) && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK);
+            if (e.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE || chord) Send(kMsgKeyDown, 0x1B);
+            break;
+        }
+#endif
         case SDL_EVENT_DID_ENTER_BACKGROUND:
             // the game waits in the menu for the player's return, rather than running on unseen
             if (!kernel::Held()) Send(kMsgKeyDown, 0x1B);
@@ -460,6 +473,13 @@ bool VulkanSurface(void* instance, void* surface) {
                                                 static_cast<VkSurfaceKHR*>(surface));
 }
 
+void* AndroidWindow() {
+#ifdef __ANDROID__
+    if (g_window) return SDL_GetPointerProperty(SDL_GetWindowProperties(g_window), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
+#endif
+    return nullptr;
+}
+
 void PixelSize(uint32_t& w, uint32_t& h) {
     int pw = 0, ph = 0;
     if (g_window) SDL_GetWindowSizeInPixels(g_window, &pw, &ph);
@@ -468,6 +488,24 @@ void PixelSize(uint32_t& w, uint32_t& h) {
 }
 
 void UiNewFrame() { ImGui_ImplSDL3_NewFrame(); }
+
+#ifdef __ANDROID__
+// ANativeWindow_setFrameRate, Android 11 and later: a panel able to run slower needs not stay at 120 for a game at 30
+void TellScreenRate(uint32_t rate) {
+    using SetFrameRate = int32_t (*)(void*, float, int8_t);
+    static const auto set = [] {
+        void* lib = dlopen("libnativewindow.so", RTLD_NOW);
+        return lib ? reinterpret_cast<SetFrameRate>(dlsym(lib, "ANativeWindow_setFrameRate")) : nullptr;
+    }();
+    static void* told_window = nullptr;
+    static uint32_t told_rate = 0;
+    void* window = AndroidWindow();
+    if (!set || !window || g_surface_paused.load() || (window == told_window && rate == told_rate)) return;
+    told_window = window;
+    told_rate = rate;
+    set(window, float(rate), 0);  // ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT
+}
+#endif
 
 void Pace(uint32_t vblanks) {
     using clock = std::chrono::steady_clock;
@@ -482,6 +520,12 @@ void Pace(uint32_t vblanks) {
     auto period = std::chrono::nanoseconds(1000000000ull / cap);
     next += period;
     if (next < now - period) next = now;
+#ifdef __ANDROID__
+    // the screen follows the game, and the wait sleeps: spinning out its end only heats a phone, and a hot phone slows down
+    TellScreenRate(cap * std::max<uint32_t>(Get().frame_generation, 1));
+    std::this_thread::sleep_until(next);
+    return;
+#endif
     while (clock::now() + std::chrono::milliseconds(2) < next) std::this_thread::sleep_for(std::chrono::milliseconds(1));
     while (clock::now() < next) std::this_thread::yield();
 }

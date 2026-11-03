@@ -41,6 +41,7 @@ namespace ui {
 
 bool g_fps_overlay = false;
 bool g_fps_title = true;
+uint32_t g_menu_language = 0;
 
 namespace {
 
@@ -398,6 +399,224 @@ void DrawWarp() {
     Hint("Loads the level first. Nothing plays if that level doesn't have it.");
 }
 
+#ifdef __ANDROID__
+// The menu on a phone: the whole screen, for a finger. Sections to the left, and each setting a row of big choices, with
+// what a phone has no use for (window modes, resolutions, keyboard and mouse) left out.
+constexpr ImVec4 kMenuBack(0.067f, 0.086f, 0.043f, 0.97f), kMenuButton(0.20f, 0.25f, 0.11f, 1.0f),
+    kMenuAccent(1.0f, 0.694f, 0.239f, 1.0f), kMenuAccentDown(0.91f, 0.392f, 0.102f, 1.0f),
+    kMenuOnAccent(0.141f, 0.063f, 0.016f, 1.0f), kMenuDim(0.725f, 0.753f, 0.659f, 1.0f);
+bool g_menu_dragged = false;  // the finger scrolled: what it lifts from is not a tap
+
+const char* Tr(const char* es, const char* en, const char* pt) {
+    return g_menu_language == 1 ? en : g_menu_language == 2 ? pt : es;
+}
+
+bool MenuButton(const char* label, bool on, ImVec2 size) {
+    ImGui::PushStyleColor(ImGuiCol_Button, on ? kMenuAccent : kMenuButton);
+    // the same as at rest: a finger leaves no hover behind to show
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, on ? kMenuAccent : kMenuButton);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, kMenuAccentDown);
+    ImGui::PushStyleColor(ImGuiCol_Text, on ? kMenuOnAccent : ImVec4(1, 1, 1, 1));
+    const bool pressed = ImGui::Button(label, size);
+    ImGui::PopStyleColor(4);
+    return pressed && !g_menu_dragged;
+}
+
+void MenuHint(const char* text) {
+    ImGui::PushStyleColor(ImGuiCol_Text, kMenuDim);
+    ImGui::PushFont(nullptr, std::round(ImGui::GetFontSize() * 0.72f));
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopFont();
+    ImGui::PopStyleColor();
+}
+
+void MenuTitle(const char* text) {
+    ImGui::Dummy(ImVec2(0, ImGui::GetFontSize() * 0.5f));
+    ImGui::PushStyleColor(ImGuiCol_Text, kMenuAccent);
+    ImGui::TextUnformatted(text);
+    ImGui::PopStyleColor();
+}
+
+// a row of equal choices; at holds the one on, or -1 when the value is none of them
+bool MenuChoice(const char* label, const char* const* names, int count, int& at, const char* hint = nullptr) {
+    ImGui::PushID(label);
+    ImGui::TextUnformatted(label);
+    if (hint) MenuHint(hint);
+    const float gap = ImGui::GetStyle().ItemInnerSpacing.x;
+    const float width = (ImGui::GetContentRegionAvail().x - gap * float(count - 1)) / float(count);
+    bool changed = false;
+    for (int i = 0; i < count; i++) {
+        if (i) ImGui::SameLine(0, gap);
+        ImGui::PushID(i);
+        if (MenuButton(names[i], i == at, ImVec2(width, 0))) {
+            changed = i != at;
+            at = i;
+        }
+        ImGui::PopID();
+    }
+    ImGui::PopID();
+    ImGui::Dummy(ImVec2(0, ImGui::GetFontSize() * 0.3f));
+    return changed;
+}
+
+void MenuSwitch(const char* label, bool* v, const char* hint = nullptr) {
+    const char* const kNames[] = {Tr("No", "No", "Não"), Tr("Sí", "Yes", "Sim")};
+    int at = *v ? 1 : 0;
+    if (MenuChoice(label, kNames, 2, at, hint)) *v = at == 1;
+}
+
+// a percentage, from a few values; one from settings.toml between them lights none
+void MenuPercent(const char* label, uint32_t* v, const uint32_t* values, const char* const* names, int count,
+                 const char* hint = nullptr) {
+    int at = -1;
+    for (int i = 0; i < count; i++)
+        if (values[i] == *v) at = i;
+    if (MenuChoice(label, names, count, at, hint)) *v = values[at];
+}
+
+void MenuAmount(const char* label, uint32_t* v, const char* hint = nullptr) {
+    static constexpr uint32_t kValues[] = {0, 25, 50, 75, 100};
+    static const char* const kNames[] = {"0", "25", "50", "75", "100"};
+    MenuPercent(label, v, kValues, kNames, 5, hint);
+}
+
+// settings a choice index picks a value of
+void MenuValues(const char* label, uint32_t* v, const uint32_t* values, const char* const* names, int count) {
+    MenuPercent(label, v, values, names, count);
+}
+
+void MenuGraphics(app::Settings& s) {
+    MenuTitle(Tr("Imagen", "Picture", "Imagem"));
+    static constexpr uint32_t kRates[] = {30, 60};
+    const char* const kRateNames[] = {"30 (original)", "60"};
+    int rate = display::g_frame_rate >= 60 ? 1 : 0;
+    if (MenuChoice("FPS", kRateNames, 2, rate, Tr("60 exige bastante más al teléfono.", "60 asks far more of the phone.", "60 exige bem mais do telefone.")))
+        display::SetFrameRate(kRates[rate]);
+    static constexpr uint32_t kRender[] = {33, 50, 67, 75, 100, 150};
+    static const char* const kRenderNames[] = {"33", "50", "67", "75", "100", "150"};
+    MenuPercent(Tr("Resolución %", "Resolution %", "Resolução %"), &s.render_percent, kRender, kRenderNames, 6,
+                Tr("Más nítido cuanto más alto, y más lento. 100 es la pantalla del teléfono.", "Sharper the higher, and slower. 100 is the phone's screen.", "Mais nítido quanto mais alto, e mais lento. 100 é a tela do telefone."));
+    static const char* const kAspects[] = {"auto", "4:3", "16:9"};
+    int aspect = -1;
+    for (int i = 0; i < 3; i++)
+        if (s.aspect == kAspects[i]) aspect = i;
+    if (MenuChoice(Tr("Proporción", "Aspect", "Proporção"), kAspects, 3, aspect)) s.aspect = kAspects[aspect];
+    static constexpr uint32_t kAniso[] = {0, 2, 4, 8, 16};
+    static const char* const kAnisoNames[] = {Tr("Juego", "Game", "Jogo"), "2x", "4x", "8x", "16x"};
+    MenuValues(Tr("Filtrado anisótropo", "Anisotropic filtering", "Filtragem anisotrópica"), &s.aniso, kAniso, kAnisoNames, 5);
+    static constexpr uint32_t kMsaa[] = {1, 2, 4};
+    const char* const kMsaaNames[] = {Tr("No", "No", "Não"), "2x", "4x"};
+    MenuValues(Tr("Antialiasing (MSAA)", "Antialiasing (MSAA)", "Antialiasing (MSAA)"), &s.msaa, kMsaa, kMsaaNames, 3);
+
+    MenuTitle(Tr("Posprocesado", "Post-processing", "Pós-processamento"));
+    MenuSwitch("SMAA", &s.smaa);
+    MenuAmount(Tr("Grano de película %", "Film grain %", "Granulação %"), &s.film_grain);
+    MenuAmount(Tr("Aberración cromática %", "Chromatic aberration %", "Aberração cromática %"), &s.chromatic_aberration);
+    MenuAmount(Tr("Oclusión ambiental %", "Ambient occlusion %", "Oclusão ambiente %"), &s.ambient_occlusion);
+}
+
+void MenuEnhancements() {
+    MenuTitle(Tr("Luz y pelo", "Light and fur", "Luz e pelo"));
+    MenuSwitch(Tr("Luz por píxel", "Per-pixel lighting", "Luz por pixel"), &lighting::g_per_pixel, Tr("Luces y sombras más suaves en personajes y objetos.", "Smoother light and shadows on characters and objects.", "Luzes e sombras mais suaves em personagens e objetos."));
+    MenuSwitch(Tr("Pelo sombreado", "Fur shading", "Pelo sombreado"), &fur::g_shading, Tr("Pelo más suave y natural.", "Softer, more natural fur.", "Pelo mais suave e natural."));
+    MenuSwitch(Tr("Pelo completo a distancia", "Full distant fur", "Pelo completo à distância"), &fur::g_distant, Tr("El pelo sigue denso a lo lejos.", "Fur stays thick far away.", "O pelo continua denso ao longe."));
+
+    MenuTitle(Tr("Hierba y agua", "Grass and water", "Grama e água"));
+    MenuSwitch(Tr("Viento en la hierba lejana", "Wind on distant grass", "Vento na grama distante"), &grass::g_wind);
+    MenuSwitch(Tr("Hierba densa a distancia", "Thick distant grass", "Grama densa à distância"), &grass::g_max_lod, Tr("La hierba lejana no pierde densidad.", "Faraway grass stays thick.", "A grama distante não perde densidade."));
+    MenuSwitch(Tr("Desvanecer hierba lejana", "Fade distant grass", "Esmaecer grama distante"), &grass::g_fade, Tr("Como en la consola.", "As on the console.", "Como no console."));
+    MenuSwitch(Tr("Agua dinámica", "Dynamic water", "Água dinâmica"), &water::g_dynamic, Tr("El agua hace olas cuando algo la atraviesa.", "Water makes waves as things move through it.", "A água faz ondas quando algo a atravessa."));
+    MenuSwitch(Tr("Profundidad en suelos", "Floor depth of field", "Profundidade nos pisos"), &reflection::g_floor_depth, Tr("Corrige el desenfoque de los suelos brillantes.", "Fixes the blur on shiny floors.", "Corrige o desfoque dos pisos brilhantes."));
+
+    MenuTitle(Tr("Juego", "Game", "Jogo"));
+    MenuSwitch(Tr("Saltar cinemáticas", "Skippable cutscenes", "Pular cenas"), &cutscenes::g_skippable, Tr("LT salta cualquier cinemática.", "LT skips any cutscene.", "LT pula qualquer cena."));
+    MenuSwitch(Tr("Bombilla duradera", "Lasting idea bulb", "Lâmpada duradoura"), &bulb::g_lasting, Tr("La bombilla sigue mientras Conker esté sobre un botón B.", "The bulb stays while Conker stands on a B pad.", "A lâmpada fica enquanto Conker estiver sobre um botão B."));
+    MenuSwitch(Tr("Física de cuerdas", "Rope physics", "Física das cordas"), &rope::g_physics);
+}
+
+void MenuSound(app::Settings& s) {
+    MenuTitle(Tr("Sonido", "Sound", "Som"));
+    MenuAmount(Tr("Volumen %", "Volume %", "Volume %"), &s.volume);
+    MenuSwitch(Tr("Silenciar en segundo plano", "Mute in background", "Silenciar em segundo plano"), &s.mute_in_background);
+}
+
+void MenuTools() {
+    MenuTitle(Tr("Herramientas", "Tools", "Ferramentas"));
+    MenuSwitch(Tr("Mostrar FPS", "Show FPS", "Mostrar FPS"), &g_fps_overlay);
+    const char* const kLanguages[] = {"Español", "English", "Português"};
+    int language = int(g_menu_language);
+    if (MenuChoice(Tr("Idioma del menú", "Menu language", "Idioma do menu"), kLanguages, 3, language))
+        g_menu_language = uint32_t(language);
+    DrawWarp();
+}
+
+void DrawTouchMenu(app::Settings& s) {
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    const float font = std::max(std::round(display.y / 26.0f), 20.0f);
+    const float margin = font * 1.2f;
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(display);
+    ImGui::PushFont(nullptr, font);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(margin, font * 0.7f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(font * 0.5f, font * 0.55f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, font * 0.4f);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(font * 0.5f, font * 0.4f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(font * 0.3f, font * 0.3f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, font * 0.35f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, kMenuBack);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+    if (ImGui::Begin("##menu", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings)) {
+        static int page = 0;
+        const char* const kPages[] = {Tr("Gráficos", "Graphics", "Gráficos"), Tr("Mejoras", "Enhancements", "Melhorias"), Tr("Sonido", "Sound", "Som"), Tr("Herramientas", "Tools", "Ferramentas")};
+        const float side = std::min(display.x * 0.24f, font * 10.0f);
+        const float row = ImGui::GetFrameHeight();
+        ImGui::BeginChild("##side", ImVec2(side, 0));
+        for (int i = 0; i < 4; i++)
+            if (MenuButton(kPages[i], i == page, ImVec2(-1, row * 1.2f))) page = i;
+        // to the bottom of the column
+        const float foot = row * 2.0f + ImGui::GetStyle().ItemSpacing.y;
+        ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetContentRegionMax().y - foot));
+        if (MenuButton(Tr("Volver al juego", "Back to the game", "Voltar ao jogo"), true, ImVec2(-1, row))) Close();
+        if (MenuButton("Salir del juego", false, ImVec2(-1, row))) ImGui::OpenPopup("##quit");
+        ImGui::SetNextWindowPos(ImVec2(display.x * 0.5f, display.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(std::min(display.x * 0.6f, font * 24.0f), 0));
+        if (ImGui::BeginPopupModal("##quit", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove)) {
+            ImGui::TextWrapped(Tr("¿Salir del juego? Se pierde lo que no hayas guardado.", "Quit the game? What you haven't saved is lost.", "Sair do jogo? O que não foi salvo será perdido."));
+            const float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+            if (MenuButton(Tr("Salir", "Quit", "Sair"), false, ImVec2(half, 0))) app::Quit();  // only posts: the window thread closes
+            ImGui::SameLine();
+            if (MenuButton(Tr("Seguir jugando", "Keep playing", "Continuar jogando"), true, ImVec2(half, 0))) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        ImGui::EndChild();
+
+        ImGui::SameLine(0, margin);
+        ImGui::BeginChild("##page", ImVec2(0, 0));
+        switch (page) {
+            case 0: MenuGraphics(s); break;
+            case 1: MenuEnhancements(); break;
+            case 2: MenuSound(s); break;
+            default: MenuTools(); break;
+        }
+        // ImGui scrolls by wheel and bar: here by the finger, anywhere on the page
+        const ImGuiIO& io = ImGui::GetIO();
+        if (!io.MouseDown[0]) {
+            g_menu_dragged = false;
+        } else if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+            if (ImGui::IsMouseDragging(ImGuiMouseButton_Left, font * 0.4f)) g_menu_dragged = true;
+            if (g_menu_dragged) ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
+        }
+        ImGui::EndChild();
+    }
+    ImGui::End();
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(8);
+    ImGui::PopFont();
+}
+#endif
+
 }  // namespace
 
 void Draw(double fps) {
@@ -460,6 +679,10 @@ void Draw(double fps) {
     if (!open) return;
 
     app::Settings& s = app::Get();
+#ifdef __ANDROID__
+    DrawTouchMenu(s);
+    return;
+#endif
     // first opened (there is no imgui.ini, so each launch): about half the display, centred, never smaller than the
     // keyboard bindings need nor larger than the display
     const ImVec2 display = ImGui::GetIO().DisplaySize;
@@ -698,6 +921,7 @@ namespace ui {
 
 bool g_fps_overlay = false;
 bool g_fps_title = true;
+uint32_t g_menu_language = 0;
 
 void Draw(double) {}
 

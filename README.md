@@ -1,8 +1,8 @@
 # Conker: Live & Reloaded — Android Evolved
 
 Port experimental a Android ARM64 por recompilación estática, sin emulador. **Todavía no es jugable:** el juego arranca en un
-Redmi Note 8 y dibuja sus escenas y menús, pero empezar una partida se cuelga en la pantalla de carga. El estado de cada parte está
-en [docs/PROGRESS.md](docs/PROGRESS.md).
+Redmi Note 8 y un Samsung S25 Ultra y dibuja sus escenas y menús, pero empezar una partida se ha colgado a veces en la pantalla de carga.
+El estado de cada parte está en [docs/PROGRESS.md](docs/PROGRESS.md).
 
 | Parte | Estado |
 |---|---|
