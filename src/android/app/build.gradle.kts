@@ -24,8 +24,8 @@ android {
         applicationId = "com.conker.androidevolved"
         minSdk = 28
         targetSdk = 36
-        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
-        versionName = (findProperty("versionName") as String?) ?: "dev"
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 3
+        versionName = (findProperty("versionName") as String?) ?: "0.3.0"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
     }
@@ -53,6 +53,8 @@ android {
     // unpacked at install: libadrenotools opens its hook libraries by path, from the native library folder
     packaging {
         jniLibs.useLegacyPackaging = true
+        // programs the app runs, not libraries: as they come
+        jniLibs.keepDebugSymbols += setOf("**/libzig.so", "**/libxbe_recomp.so")
     }
 
     compileOptions {

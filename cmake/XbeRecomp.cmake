@@ -69,7 +69,7 @@ FetchContent_Declare(glslang GIT_REPOSITORY https://github.com/KhronosGroup/glsl
 # Android builds only the game (a shared library, cmake/zig-android.cmake): the tools run on the PC, so their
 # libraries are left out
 if(ANDROID)
-    FetchContent_MakeAvailable(tomlplusplus imgui roboto SDL3 vulkan_headers volk vma glslang)
+    FetchContent_MakeAvailable(zydis tomlplusplus imgui roboto SDL3 vulkan_headers volk vma glslang)
 else()
     FetchContent_MakeAvailable(zydis tomlplusplus imgui roboto SDL3 miniz vulkan_headers volk vma glslang fltk uecc)
 endif()
@@ -146,6 +146,15 @@ if(XBE_ZIG_TARGET AND NOT WIN32)
     target_link_options(apkbuilder PRIVATE -Wl,--allow-shlib-undefined)
 endif()
 endif()  # NOT ANDROID
+
+if(ANDROID)
+    # the recompiler for the phone itself: the app compiles the game on the device, from the player's copy (DeviceBuild.kt)
+    file(GLOB XBE_RECOMP_SOURCES CONFIGURE_DEPENDS ${XBE_ROOT_DIR}/src/recomp/*.cpp)
+    add_executable(xbe_recomp_device ${XBE_RECOMP_SOURCES})
+    target_include_directories(xbe_recomp_device PRIVATE ${XBE_ROOT_DIR}/src/runtime ${XBE_ROOT_DIR}/src/recomp)
+    target_link_libraries(xbe_recomp_device PRIVATE Zydis tomlplusplus::tomlplusplus)
+    target_link_options(xbe_recomp_device PRIVATE -Wl,-z,max-page-size=16384)
+endif()
 
 set(XBE_IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp

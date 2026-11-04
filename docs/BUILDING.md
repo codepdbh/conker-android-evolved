@@ -14,7 +14,14 @@ scripts\build_android.ps1 -LauncherOnly
 scripts\install_android.ps1
 ```
 
-Esta es la única APK que se puede publicar: no lleva código del juego. Compruébala siempre antes de subirla.
+Esta es la única APK que se puede publicar: no lleva código del juego. Compruébala siempre antes de subirla. Trae las herramientas
+para que el teléfono compile el juego, sin PC (`DeviceBuild.kt`, `scripts/make_devkit.py`). Necesita `assets/default.xbe` en el PC que la
+genera, solo para preparar el kit.
+
+## Para jugadores
+
+Instala la APK de los releases y elige tu copia, una imagen `.iso` del disco USA o la versión de Microsoft Store. La app instala la copia
+y compila el juego sola, una vez: unos 15 minutos en un Redmi Note 8. Hacen falta unos 8 GB libres: 5 GB del juego y 3 GB durante la compilación.
 
 ## Con el juego
 

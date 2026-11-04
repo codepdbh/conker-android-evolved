@@ -1,5 +1,9 @@
 Third party software in the executables built with this SDK
 
+Zig 0.16.0 for ARM64 Linux (https://ziglang.org), MIT License, with the LLVM, Clang, LLD, libc++, libc++abi and libunwind it
+brings (Apache License 2.0 with LLVM Exceptions): the compiler in the public APK, as libzig.so, that compiles the game on the
+phone. Its LICENSE goes in the APK's devkit.zip, as zig-LICENSE. The official build, unchanged: see scripts/make_devkit.py.
+
 libadrenotools, commit 8fae8ce (https://github.com/bylaws/libadrenotools) and liblinkernsbypass, commit aa39758
 (https://github.com/bylaws/liblinkernsbypass), to load a Vulkan driver the player imports. BSD 2-Clause, Copyright (c) 2021,
 Billy Laws: the full text is in the LICENSE file in third_party/libadrenotools and in its lib/linkernsbypass.

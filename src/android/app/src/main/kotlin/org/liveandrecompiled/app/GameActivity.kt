@@ -19,6 +19,17 @@ class GameActivity : SDLActivity() {
 
     private val sentinel by lazy { File(filesDir, RUNNING) }
 
+    // the game compiled on this phone (DeviceBuild), in the app's files rather than the APK
+    override fun getMainSharedObject(): String {
+        val made = DeviceBuild.library(this)
+        return if (made.isFile) made.path else super.getMainSharedObject()
+    }
+
+    override fun loadLibraries() {
+        val made = DeviceBuild.library(this)
+        if (made.isFile) System.load(made.path) else super.loadLibraries()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // left behind by a run that dies: the launcher reads it to offer the report (a run that ends well removes it)
         sentinel.writeText(System.currentTimeMillis().toString())

@@ -16,8 +16,8 @@ El estado de cada parte está en [docs/PROGRESS.md](docs/PROGRESS.md).
 | Renderer con alternativas para Vulkan 1.1 | Dibuja en Adreno 610; sin revisar en partida |
 | Mali y Xclipse (Helio, Dimensity, Exynos) | Sin probar, no hay dispositivos |
 
-El repositorio no incluye el juego, sus recursos ni código generado desde su ejecutable. Hace falta una copia propia:
-[docs/BUILDING.md](docs/BUILDING.md).
+El repositorio y la APK no incluyen el juego, sus recursos ni código generado desde su ejecutable. Hace falta una copia propia, el disco
+USA o la versión de Microsoft Store: la app compila el juego en el teléfono a partir de ella, sin PC. Ver [docs/BUILDING.md](docs/BUILDING.md).
 
 Es un derivado modificado de [Mabec-games/live-and-recompiled](https://github.com/Mabec-games/live-and-recompiled), rama `android`,
 commit `25e614d`, con cambios desde el 2026-11-02 (GPL-3.0). Lo de abajo es el README de upstream: describe su versión, y su

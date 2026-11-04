@@ -47,6 +47,9 @@ class SetupActivity : Activity() {
     private lateinit var play: Button
     private lateinit var pick: List<Button>
     private lateinit var fps: List<Button>
+    private lateinit var howTo: Button
+    private lateinit var prepare: Button
+    private lateinit var copyPanel: View
     private lateinit var gameLanguages: LinearLayout
     private lateinit var gameLanguageNote: TextView
     private lateinit var choice: (String, () -> Unit) -> Button
@@ -69,15 +72,67 @@ class SetupActivity : Activity() {
     override fun onResume() {
         super.onResume()
         refresh()
+        if (DeviceBuild.isRunning()) watchBuild()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        ticker.removeCallbacks(tick)
     }
 
     private fun installed() = File(gameFiles, READY).exists()
 
     // libmain.so is the game recompiled for this phone, absent from a launcher-only build
-    private fun gameBuilt() = try {
+    private fun apkHasGame() = try {
         java.util.zip.ZipFile(applicationInfo.sourceDir).use { it.getEntry("lib/arm64-v8a/libmain.so") != null }
     } catch (_: Exception) {
         false
+    }
+
+    private fun copySha() = File(gameFiles, READY).takeIf { it.isFile }?.readText()?.trim()
+
+    // the game to run: in a developer's APK, or compiled on this phone for the copy installed
+    private fun gameBuilt() = apkHasGame() || DeviceBuild.built(this, copySha())
+
+    private fun startDeviceBuild() {
+        if (DeviceBuild.isRunning()) return
+        if (!DeviceBuild.enoughRoom(this)) {
+            say(Lang.t("No hay espacio: preparar el juego necesita 3 GB libres.", "Not enough room: preparing the game needs 3 GB free.", "Sem espaço: preparar o jogo requer 3 GB livres."))
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 0)
+        startForegroundService(Intent(this, DeviceBuildService::class.java))
+        watchBuild()
+    }
+
+    // the build's progress while the launcher is on screen
+    private val ticker = android.os.Handler(android.os.Looper.getMainLooper())
+    private val tick = object : Runnable {
+        override fun run() {
+            val s = DeviceBuild.state
+            val going = DeviceBuild.isRunning()
+            if (going || s.phase == DeviceBuild.Phase.TOOLS) {
+                bar.visibility = View.VISIBLE
+                bar.isIndeterminate = s.total == 0
+                if (s.total > 0) bar.progress = s.done * 1000 / s.total
+                say(DeviceBuildService.phaseText(s))
+                refresh()
+                ticker.postDelayed(this, 1000)
+                return
+            }
+            bar.visibility = View.GONE
+            when (s.phase) {
+                DeviceBuild.Phase.DONE -> say(Lang.t("Juego listo. Ya puedes jugar.", "Game ready. You can play now.", "Jogo pronto. Já pode jogar."))
+                DeviceBuild.Phase.FAILED -> say(Lang.t("No se pudo preparar el juego: ", "The game couldn't be prepared: ", "Não foi possível preparar o jogo: ") + s.error.take(300))
+                else -> {}
+            }
+            refresh()
+        }
+    }
+
+    private fun watchBuild() {
+        ticker.removeCallbacks(tick)
+        ticker.post(tick)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -164,6 +219,13 @@ class SetupActivity : Activity() {
         heroPane.addView(install)
         play = button(Lang.t("Jugar", "Play", "Jogar"), primary = true) { startActivity(Intent(this, GameActivity::class.java)) }
         heroPane.addView(play)
+        // without the game in the APK, nothing here can start it: say so, and how to get one that can
+        howTo = button(Lang.t("Cómo conseguir el juego", "How to get the game", "Como obter o jogo"), primary = true) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(HOW_TO_PLAY)))
+        }
+        heroPane.addView(howTo)
+        prepare = button(Lang.t("Preparar el juego", "Prepare the game", "Preparar o jogo"), primary = true) { startDeviceBuild() }
+        heroPane.addView(prepare)
         val iso = button(Lang.t("Elegir imagen de disco (.iso)", "Choose disc image (.iso)", "Escolher imagem de disco (.iso)")) {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
@@ -252,7 +314,13 @@ class SetupActivity : Activity() {
                 Lang.t("el juego: si pasa, vuelve aquí a \"Driver del teléfono\".", "the game: if so, come back here to \"Phone's driver\".", "o jogo: se acontecer, volte aqui em \"Driver do telefone\"."), 13f, color = MUTED).apply {
                 setPadding(0, dp(8), 0, 0)
             }))
-        sidePane.addView(panel(label(Lang.t("Tu copia del juego", "Your copy of the game", "Sua cópia do jogo")), iso, folder, bar, status))
+        // in sight, under Play: installing and preparing take minutes
+        bar.layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) }
+        status.gravity = Gravity.CENTER
+        heroPane.addView(bar)
+        heroPane.addView(status)
+        copyPanel = panel(label(Lang.t("Tu copia del juego", "Your copy of the game", "Sua cópia do jogo")), iso, folder)
+        sidePane.addView(copyPanel)
         sidePane.addView(panel(label(Lang.t("Este teléfono", "This phone", "Este telefone")), phone, button(Lang.t("Ver compatibilidad", "See compatibility", "Ver compatibilidade")) { showCompat() }))
         sidePane.addView(panel(label(Lang.t("Mando", "Controller", "Controle")), gamepad,
             text(Lang.t("Conéctalo por Bluetooth o USB, también con el juego abierto. Guide, o Start y Back a la vez, abren el menú.",
@@ -315,6 +383,14 @@ class SetupActivity : Activity() {
         // the phone's own driver is what the check read: an imported one is the player's to try
         val fits = compat.verdict != Level.FAIL || chosen != null
         play.isEnabled = built && have && fits
+        val canCompile = DeviceBuild.available(this)
+        val building = DeviceBuild.isRunning()
+        play.visibility = if (built) View.VISIBLE else View.GONE
+        howTo.visibility = if (built || canCompile) View.GONE else View.VISIBLE
+        copyPanel.visibility = if (built || canCompile) View.VISIBLE else View.GONE
+        prepare.visibility = if (!built && canCompile && have && fits) View.VISIBLE else View.GONE
+        prepare.isEnabled = !building
+        pick.forEach { it.isEnabled = !building }
         driver.text = chosen?.let { Lang.t("En uso: ${it.name}", "In use: ${it.name}", "Em uso: ${it.name}") } ?: Lang.t("En uso: driver del teléfono", "In use: phone's driver", "Em uso: driver do telefone")
         val rate = FrameRate.get(this)
         fps.forEachIndexed { i, b ->
@@ -330,8 +406,18 @@ class SetupActivity : Activity() {
             b.setTextColor(if (on) ON_ACCENT else Color.WHITE)
         }
         install.text = when {
-            !built -> Lang.t("Esta APK solo trae el launcher: el juego aún no está recompilado en ella.\n", "This APK only has the launcher: the game isn't recompiled in it yet.\n", "Este APK só traz o launcher: o jogo ainda não está recompilado nele.\n") +
-                Lang.t("Se puede comprobar el teléfono y validar tu copia, pero no jugar.", "You can check the phone and validate your copy, but not play.", "Dá para verificar o telefone e validar sua cópia, mas não jogar.")
+            building -> Lang.t("Preparando el juego en este teléfono. Solo se hace una vez y puede tardar de 15 a 40 minutos. Déjalo enchufado; puedes salir de la app.",
+                "Preparing the game on this phone. This happens once and can take 15 to 40 minutes. Leave it plugged in; you can leave the app.",
+                "Preparando o jogo neste telefone. Só acontece uma vez e pode levar de 15 a 40 minutos. Deixe na tomada; pode sair do app.")
+            !built && canCompile && !have -> Lang.t("Elige tu copia del juego. Después se prepara sola en este teléfono, sin PC.",
+                "Choose your copy of the game. It then gets prepared on this phone, with no PC.",
+                "Escolha sua cópia do jogo. Depois ela é preparada neste telefone, sem PC.")
+            !built && canCompile && fits -> Lang.t("Tu copia está instalada. Falta preparar el juego en este teléfono: una sola vez, de 15 a 40 minutos.",
+                "Your copy is installed. The game still has to be prepared on this phone: once, 15 to 40 minutes.",
+                "Sua cópia está instalada. Falta preparar o jogo neste telefone: uma só vez, de 15 a 40 minutos.")
+            !built && !canCompile -> Lang.t("Esta APK NO incluye el juego y no permite jugar. Sirve para comprobar tu teléfono. Para jugar, crea la APK en tu PC con tu propia copia.",
+                "This APK does NOT include the game and can't play it. It checks your phone. To play, make the APK on your PC from your own copy.",
+                "Este APK NÃO inclui o jogo e não permite jogar. Serve para verificar seu telefone. Para jogar, crie o APK no PC com sua própria cópia.")
             !have -> Lang.t("Elige tu copia del juego para instalarla en la memoria de la app.", "Choose your copy of the game to install it in the app's storage.", "Escolha sua cópia do jogo para instalá-la na memória do app.")
             !fits -> Lang.t("El juego está instalado, pero este teléfono no cumple los requisitos.", "The game is installed, but this phone doesn't meet the requirements.", "O jogo está instalado, mas este telefone não atende aos requisitos.")
             else -> Lang.t("Listo para jugar.", "Ready to play.", "Pronto para jogar.")
@@ -579,6 +665,8 @@ class SetupActivity : Activity() {
                 bar.visibility = View.GONE
                 pick.forEach { it.isEnabled = true }
                 if (error.isEmpty()) GameLanguage.followApp(this)
+                // straight on, on its own: choosing the copy is all a player has to do
+                if (error.isEmpty() && !gameBuilt() && DeviceBuild.available(this) && compat.verdict != Level.FAIL) startDeviceBuild()
                 say(error.ifEmpty { Lang.t("Juego instalado.", "Game installed.", "Jogo instalado.") })
                 refresh()
             }
@@ -686,6 +774,7 @@ class SetupActivity : Activity() {
     private fun say(text: String) = runOnUiThread { status.text = text }
 
     private companion object {
+        const val HOW_TO_PLAY = "https://github.com/codepdbh/conker-android-evolved/blob/main/docs/BUILDING.md"
         const val PICK_ISO = 1
         const val PICK_FOLDER = 2
         const val PICK_DRIVER = 3

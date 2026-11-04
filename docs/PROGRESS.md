@@ -77,7 +77,7 @@ Medido en el Samsung:
 Solo compilado, sin ejecutar: importar y usar un driver (`Drivers.kt`, `gpudriver.cpp`, `LoadVulkan`), reportar en GitHub (`Issue.kt`), el
 los mandos físicos (sin mando a mano) y su atajo Guide o Start+Back, el efecto de los ajustes de calidad y
 del ritmo sin espera activa (`Pace`, `TellScreenRate`). Las bibliotecas nativas se desempaquetan ahora al instalar, porque libadrenotools
-abre sus hooks por ruta; `tools/package-android.cmake` y `src/apkbuilder/` no incluyen estas bibliotecas.
+abre sus hooks por ruta.
 
 Red: Xbox Live no existe en el runtime (`xnet.cpp`). System Link sí, sin probar; en el Redmi `bind` al puerto 1001 falló con 10013, que
 parece el límite de Android para puertos menores de 1024.
@@ -85,6 +85,14 @@ parece el límite de Android para puertos menores de 1024.
 Con `Conker.iso`, el disco USA soportado, en el Redmi Note 8: se instala desde el launcher (881 archivos) y el usuario cargó ThroneRoom, Windmill
 y TrainingLevel, con Conker en pantalla. El launcher ofrece solo los idiomas que trae la copia instalada (`GameLanguage`). Sin ver: el
 texto del juego en cada idioma.
+
+Compilar en el teléfono, sin PC. Probado en el Redmi Note 8 con los datos borrados: elegir `Conker.iso` instala la copia y compila sola en
+un servicio en primer plano (881 s, 4 partes a la vez, batería a 31 °C). "Jugar" carga el `libmain.so` generado, en `files/game`, y el
+juego arranca hasta su menú con los textos en español. La APK pública lleva Zig y el recompilador en la carpeta de bibliotecas nativas,
+el único sitio desde el que Android deja ejecutar programas. Sin probar: otros teléfonos, una compilación cortada a medias y retomada.
+
+El constructor para PC (`tools/package-android.cmake`, `src/apkbuilder/`) también funciona: desde la ISO a una APK firmada en 161 s, en un
+PC de 12 hilos, sin instalarla en un teléfono.
 
 Fallos abiertos:
 

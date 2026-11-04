@@ -21,11 +21,16 @@ if (-not $LauncherOnly) {
     New-Item -ItemType Directory -Force $assets | Out-Null
     (Get-FileHash assets\default.xbe -Algorithm SHA1).Hash.ToLower() | Set-Content -Encoding ascii "$assets\accepted_xbe.txt"
     $gradleArgs += "-PnativeLibs=$Root\out\build\zig-android\apk", "-PextraAssets=$Root\$assets"
-} elseif (-not (Test-Path 'out\build\zig-android\_deps\sdl3-src')) {
-    # SDL's Java side comes from the SDL the game builds with
+} else {
+    # what is handed out: no game, and the tools for the phone to compile it from the player's copy
     cmake -DWHAT=zig-windows -P tools\configure.cmake
     cmake --build out\build\zig-windows --target xbe_recomp
     cmake -DWHAT=zig-android -P tools\configure.cmake
+    cmake --build out\build\zig-android --target Game_android_kit xbe_recomp_device -j $Jobs
+    if ($LASTEXITCODE) { throw "the kit's build failed ($LASTEXITCODE)" }
+    python scripts\make_devkit.py
+    if ($LASTEXITCODE) { throw "make_devkit failed ($LASTEXITCODE)" }
+    $gradleArgs += "-PnativeLibs=$Root\out\build\zig-android\devkit\native", "-PextraAssets=$Root\out\build\zig-android\devkit\assets"
 }
 Push-Location src\android
 try {
